@@ -13,6 +13,7 @@ public partial class MainWindow : Window
     private readonly ShellViewModel shell = new();
     private readonly Settings settings;
     private readonly bool firstRun;
+    private bool firstSetupShown;
     private readonly AiService ai = new();
     private NativePenObserver? penObserver;
     private RawPenInput? rawPen;
@@ -48,7 +49,9 @@ public partial class MainWindow : Window
         initialized = true; ApplyTheme(); ApplyFocus(); UpdateBoards(); UpdatePanels(); UpdateTool(); UpdateCounts();
         timer.Tick += TimerTick; timer.Start(); Closing += OnClosing;
         SetStatus("기기에 저장됨 · AI·Drive 연결은 설정에서 추가하세요.");
-        Loaded += async (_, _) => { if (firstRun) RunFirstSetup(); await InitializeWorkspace(); };
+        // 첫 실행이면 창이 화면에 그려진 뒤(ContentRendered) 설정 창을 먼저 띄우고, 저장한 설정으로 Drive 목록을 읽습니다
+        if (firstRun) ContentRendered += async (_, _) => { if (firstSetupShown) return; firstSetupShown = true; RunFirstSetup(); await InitializeWorkspace(); };
+        else Loaded += async (_, _) => await InitializeWorkspace();
         SizeChanged += (_, _) => UpdateToolbarLayout(); UpdateToolbarLayout();
         InitUpdater();
     }

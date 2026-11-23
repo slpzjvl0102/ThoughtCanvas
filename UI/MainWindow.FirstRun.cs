@@ -8,8 +8,9 @@ public partial class MainWindow
 {
     private void RunFirstSetup()
     {
-        // 기본값(G:\내 드라이브)이 이 PC에 없으면 Google Drive 데스크톱 앱의 폴더를 찾아 채우고, 없으면 비워 둡니다
+        // Google Drive 데스크톱 앱 폴더(내 드라이브/My Drive)를 찾아 채우고, 없으면 비워 둡니다
         if (!Directory.Exists(settings.DriveSyncFolder)) settings.DriveSyncFolder = FindGoogleDriveFolder() ?? "";
+        Activate();
         bool saved = Dialogs.Settings(this, settings, firstRun: true);
         store.SaveSettings(settings);
         SetStatus(saved ? "처음 설정을 저장했습니다." : "기본 설정으로 시작합니다 · 작업 → 연결 설정에서 바꿀 수 있습니다.");
