@@ -139,6 +139,20 @@ public static class SelfTests
                 Assert(rejected, "HTTP 오류를 성공으로 처리함");
             }
         });
+        Test("Gemini 429 시 대체 Model로 전환", () =>
+        {
+            var b = new Board { Ink = [Line()] }; var regions = ExportService.RenderRegions(b);
+            var handler = new FixtureHandler(b.Ink[0].Id) { ExhaustedModel = "gemini-3.8-flash" };
+            var service = new AiService(new System.Net.Http.HttpClient(handler));
+            var result = Task.Run(() => service.Analyze(b, regions, "fixture-key", "gemini-3.8-flash, gemini-3.5-flash-lite", CancellationToken.None)).GetAwaiter().GetResult();
+            Assert(result.Document == "Draw 분석" && service.LastModel == "gemini-3.5-flash-lite" && handler.Url!.Contains("gemini-3.5-flash-lite"), "대체 Model 전환 실패");
+            Assert(GeminiModels.Chain(" gemini-3.8-flash ,gemini-3.8-flash,, gemini-3.5-flash-lite ").SequenceEqual(["gemini-3.8-flash", "gemini-3.5-flash-lite"]), "Model 목록 해석 오류");
+            Assert(!GeminiModels.IsValid("gemini-3.8-flash, gpt-6-astra") && !GeminiModels.IsValid(" , "), "잘못된 대체 Model 허용");
+            handler.ExhaustedModel = "gemini-3"; bool rejected = false;
+            try { Task.Run(() => service.Analyze(b, regions, "fixture-key", "gemini-3.8-flash, gemini-3.5-flash-lite", CancellationToken.None)).GetAwaiter().GetResult(); }
+            catch (InvalidOperationException ex) { rejected = ex.Message.Contains("429"); }
+            Assert(rejected, "모든 Model 소진 시 오류를 알리지 않음");
+        });
         Test("기존 설정 전환: OpenAI Key 격리·자동 AI 중지·Drive 설정 보존", () =>
         {
             var store = new BoardStore(Path.Combine(root, "migration"));
@@ -352,13 +366,15 @@ public static class SelfTests
         public string? Key { get; private set; }
         public bool HasAuthorization { get; private set; }
         public System.Net.HttpStatusCode Status { get; set; } = System.Net.HttpStatusCode.OK;
+        public string? ExhaustedModel { get; set; }
         protected override async Task<System.Net.Http.HttpResponseMessage> SendAsync(System.Net.Http.HttpRequestMessage request, CancellationToken cancellationToken)
         {
             RequestBody = await request.Content!.ReadAsStringAsync(cancellationToken);
             Url = request.RequestUri!.ToString(); Key = request.Headers.GetValues("x-goog-api-key").Single(); HasAuthorization = request.Headers.Authorization != null;
             var result = new AnalysisResult { Document = "Draw 분석", Ideas = [new() { Id = "i1", Content = "Draw", SourceIds = [id] }] };
-            var payload = Status == System.Net.HttpStatusCode.OK ? WrapResponse(result) : JsonSerializer.Serialize(new { error = new { message = "test error fixture-key" } });
-            return new(Status) { Content = new System.Net.Http.StringContent(payload) };
+            var status = ExhaustedModel != null && Url.Contains("/models/" + ExhaustedModel) ? System.Net.HttpStatusCode.TooManyRequests : Status;
+            var payload = status == System.Net.HttpStatusCode.OK ? WrapResponse(result) : JsonSerializer.Serialize(new { error = new { message = "test error fixture-key" } });
+            return new(status) { Content = new System.Net.Http.StringContent(payload) };
         }
     }
 }

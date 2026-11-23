@@ -26,7 +26,7 @@ public partial class MainWindow : Window
             AiService.Apply(target, result); target.SavesSinceAi = Math.Max(0, target.SavesSinceAi - snapshot.SavesSinceAi); target.Revision++; target.ModifiedUtc = DateTime.UtcNow;
             TopicDocuments.Refresh(target); SyncEngine.Stamp(target, settings.DeviceId); store.Save(target);
             if (ReferenceEquals(target, Surface.Board)) { dirty = true; UpdatePanels(); if (interactive) ShowPanel(true); }
-            SetStatus("AI 초안이 준비되었습니다. 검증 Panel에서 불확실한 내용을 확인하세요.");
+            SetStatus("AI 초안이 준비되었습니다. 검증 Panel에서 불확실한 내용을 확인하세요." + (ai.LastModel != GeminiModels.Chain(settings.Model).FirstOrDefault() ? $" (사용량 한도로 {ai.LastModel} 사용)" : ""));
         }
         finally { aiBusy = false; }
     }

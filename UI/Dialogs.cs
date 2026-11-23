@@ -54,7 +54,7 @@ public static class Dialogs
         Label($"현재 Key 출처: {GeminiCredentials.Resolve(settings).Source} · Key 값은 표시하지 않습니다.");
         Label("환경 변수 우선: GEMINI_API_KEY → GOOGLE_API_KEY → 앱에 저장한 Key. 각 변수는 User → Machine → Process 순서로 확인합니다. 환경 변수를 사용하면 아래 Key는 비워두셔도 됩니다.");
         Label("Gemini API key · 이 Windows 사용자에게 암호화하여 Local 저장"); var key = new PasswordBox { Password = Secrets.Unprotect(settings.ProtectedGeminiApiKey), Padding = new Thickness(8) }; stack.Children.Add(key);
-        Label("Model ID (기본: gemini-3.8-flash)");
+        Label("Model ID (기본: gemini-3.8-flash) · 쉼표로 대체 Model을 이어 쓰면 사용량 한도(429) 시 순서대로 전환합니다. 예: gemini-3.8-flash, gemini-3.5-flash-lite");
         var model = new TextBox { Text = settings.Model, Padding = new Thickness(8) }; stack.Children.Add(model);
         Label("현재는 Image·Structured outputs·LOW thinking을 지원하는 Gemini 3 계열을 사용하세요. Model ID는 Google AI Studio 기준이며 계정의 사용 권한에 따릅니다. 원본 Image와 맥락을 Google로 전송합니다.");
         var autoAi = new CheckBox { Content = "자동 AI 문서화 사용 (Google API 한도·Credits 사용)", IsChecked = settings.AutomaticAi, Margin = new Thickness(0, 8, 0, 8) }; stack.Children.Add(autoAi);
@@ -72,10 +72,10 @@ public static class Dialogs
         bool saved = false;
         var save = Button("설정 저장", () =>
         {
-            if (!ThoughtCanvas.Settings.IsSupportedModel(model.Text.Trim())) { Message(window, "Model 확인", "gemini-3.8-flash와 같은 Gemini 3 계열 Model ID를 입력하세요."); return; }
+            if (!GeminiModels.IsValid(model.Text)) { Message(window, "Model 확인", "gemini-3.8-flash와 같은 Gemini 3 계열 Model ID를 입력하세요. 대체 Model은 쉼표로 구분합니다."); return; }
             if (!int.TryParse(count.Text, out int n) || n < 1 || n > 1000) { Message(window, "입력 확인", "저장 횟수는 1~1000 사이로 입력하세요."); return; }
             if (!Path.IsPathFullyQualified(folder.Text.Trim())) { Message(window, "폴더 확인", "Drive 폴더의 전체 경로를 입력하세요."); return; }
-            settings.Model = model.Text.Trim();
+            settings.Model = string.Join(", ", GeminiModels.Chain(model.Text));
             if (!string.IsNullOrWhiteSpace(notionParent.Text) && !Guid.TryParse(notionParent.Text.Trim(), out _)) { Message(window, "Page ID 확인", "Notion Page ID를 입력하세요 (URL의 32자리 ID)."); return; }
             settings.ProtectedNotionToken = Secrets.Protect(notionToken.Password.Trim()); settings.NotionParentId = notionParent.Text.Trim();
             settings.DeviceName = string.IsNullOrWhiteSpace(device.Text) ? Environment.MachineName : device.Text.Trim(); settings.ProtectedGeminiApiKey = Secrets.Protect(key.Password.Trim()); settings.AutomaticAi = autoAi.IsChecked == true; settings.AiEverySaves = n;
