@@ -14,16 +14,38 @@ public static class DriveFolderService
             catch (Exception ex) when (ex is IOException or System.Text.Json.JsonException or KeyNotFoundException) { }
         return result;
     }
-    public record Entry(string Path, string BoardId, string Title, string Device, long Revision, DateTime ModifiedUtc)
+    public record Entry(string Path, string BoardId, string Title, string Device, long Revision, DateTime ModifiedUtc, bool Archived = false)
     {
         public string LocalId => "drive_" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
             BoardId + "/" + Device + "/" + System.IO.Path.GetFileName(System.IO.Path.GetDirectoryName(Path))))).ToLowerInvariant();
     }
-    public record Catalog(List<Entry> Entries, int Skipped);
+    public record Catalog(List<Entry> Entries, int Skipped, Dictionary<string, DateTime>? Deleted = null);
+    // 삭제 기록(tombstone, v0.7.7): ThoughtCanvas/Deleted/<BoardId>.json. 기록이 있는 Board는 어느 기기의 저장본이든 목록에 다시 나타나지 않습니다.
+    public record Tombstone(string Id, string Title, DateTime DeletedUtc, string Device);
+    public static void MarkDeleted(string folder, Tombstone tombstone)
+    {
+        string root = Root(folder), deleted = Path.Combine(root, "Deleted");
+        BoardStore.AtomicWrite(Path.Combine(deleted, ExportService.SafeName(tombstone.Id) + ".json"), DataJson.Write(tombstone));
+        // 기록을 먼저 남긴 뒤 저장본을 지웁니다. 지우기에 실패해도 기록 때문에 목록에는 나오지 않습니다.
+        // Google Drive 폴더에서 지운 파일은 Drive 휴지통으로 갑니다.
+        string boards = Path.Combine(root, "Boards");
+        if (Directory.Exists(boards))
+            foreach (var dir in Directory.EnumerateDirectories(boards).Where(d => Path.GetFileName(d).EndsWith("_" + tombstone.Id, StringComparison.Ordinal)).ToList())
+                Tidy(() => DeleteTree(dir));
+    }
+    public static Dictionary<string, DateTime> ReadDeleted(string folder)
+    {
+        string deleted = Path.Combine(Root(folder), "Deleted"); var result = new Dictionary<string, DateTime>();
+        if (!Directory.Exists(deleted)) return result;
+        foreach (var file in Directory.EnumerateFiles(deleted, "*.json"))
+            try { var t = DataJson.Read<Tombstone>(File.ReadAllText(file)); if (!string.IsNullOrWhiteSpace(t.Id)) result[t.Id] = t.DeletedUtc; }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException) { }
+        return result;
+    }
     public static Catalog Discover(string folder, CancellationToken token)
     {
-        string boards = Path.Combine(Root(folder), "Boards");
-        if (!Directory.Exists(boards)) return new([], 0);
+        string boards = Path.Combine(Root(folder), "Boards"); var deleted = ReadDeleted(folder);
+        if (!Directory.Exists(boards)) return new([], 0, deleted);
         var entries = new List<Entry>(); int skipped = 0;
         foreach (var file in Directory.EnumerateFiles(boards, "snapshot.zip", SearchOption.AllDirectories))
         {
@@ -39,15 +61,16 @@ public static class DriveFolderService
                 var board = DataJson.Read<Board>(reader.ReadToEnd());
                 if (string.IsNullOrWhiteSpace(board.Id)) throw new InvalidDataException();
                 string device = Directory.GetParent(Path.GetDirectoryName(file)!)!.Name;
-                var item = new Entry(file, board.Id, board.Title, device, board.Revision, board.ModifiedUtc);
+                // v0.7.7 이전 기기가 올린 보관용 원본은 표시가 없으므로 제목으로도 판단합니다.
+                var item = new Entry(file, board.Id, board.Title, device, board.Revision, board.ModifiedUtc, board.Archived || BoardStore.IsBackupTitle(board.Title));
                 if (catalogCache.Count > 5000) catalogCache.Clear(); catalogCache[file] = (info.Length, info.LastWriteTimeUtc.Ticks, item); entries.Add(item);
             }
             catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or System.Text.Json.JsonException) { skipped++; }
         }
         // Revisions are only comparable within a device branch. Keep other devices separately.
-        return new(entries.GroupBy(e => (e.BoardId, e.Device)).Select(g => g.OrderByDescending(e => e.Revision)
+        return new(entries.Where(e => !deleted.ContainsKey(e.BoardId)).GroupBy(e => (e.BoardId, e.Device)).Select(g => g.OrderByDescending(e => e.Revision)
             .ThenByDescending(e => e.ModifiedUtc).ThenByDescending(e => e.Path, StringComparer.Ordinal).First())
-            .OrderByDescending(e => e.ModifiedUtc).ToList(), skipped);
+            .OrderByDescending(e => e.ModifiedUtc).ToList(), skipped, deleted);
     }
     public static string Root(string folder)
     {

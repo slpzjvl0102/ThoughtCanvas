@@ -95,6 +95,6 @@ public static class SyncEngine
     }
     public static Board Backup(Board board)
     {
-        var copy = DataJson.Clone(board); copy.Id = Guid.NewGuid().ToString("N"); copy.Title += " · 통합 전 보관 " + DateTime.Now.ToString("MM-dd HH:mm:ss"); return copy;
+        var copy = DataJson.Clone(board); copy.Id = Guid.NewGuid().ToString("N"); copy.Title += " · 통합 전 보관 " + DateTime.Now.ToString("MM-dd HH:mm:ss"); copy.Archived = true; return copy;
     }
 }
