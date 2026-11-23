@@ -57,7 +57,18 @@ jobs:
 
       # packId는 ThoughtCanvasApp — 설치 폴더 %LOCALAPPDATA%\ThoughtCanvasApp가 데이터 폴더 %LOCALAPPDATA%\ThoughtCanvas와 겹치지 않게 합니다
       - name: Pack
-        run: vpk pack -u ThoughtCanvasApp -v ${{ steps.ver.outputs.version }} -p publish -e ThoughtCanvas.exe --packTitle ThoughtCanvas -o releases
+        run: vpk pack -u ThoughtCanvasApp -v ${{ steps.ver.outputs.version }} -r win-x64 -p publish -e ThoughtCanvas.exe --packTitle ThoughtCanvas -o releases
+
+      # 이전 실행이 업로드 도중 실패하면 같은 tag의 draft Release가 남아 다음 업로드를 막습니다.
+      # 게시되지 않은 draft만 지우고 다시 올립니다 (게시된 Release는 건드리지 않음).
+      - name: Remove leftover draft release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "v${{ steps.ver.outputs.version }}"
+          $drafts = gh api "repos/${{ github.repository }}/releases?per_page=100" | ConvertFrom-Json | Where-Object { $_.draft -and $_.tag_name -eq $tag }
+          foreach ($d in $drafts) { Write-Output "draft Release $tag ($($d.id)) 삭제"; gh api -X DELETE "repos/${{ github.repository }}/releases/$($d.id)" }
 
       - name: Upload GitHub Release
         run: vpk upload github --repoUrl ${{ github.server_url }}/${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }} -o releases --publish --releaseName "ThoughtCanvas ${{ steps.ver.outputs.version }}" --tag v${{ steps.ver.outputs.version }}
