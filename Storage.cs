@@ -58,6 +58,13 @@ public class BoardStore
         using var c = Open(); using var cmd = c.CreateCommand(); cmd.CommandText = "SELECT id,title FROM boards ORDER BY modified DESC"; using var r = cmd.ExecuteReader();
         var result = new List<(string, string)>(); while (r.Read()) result.Add((r.GetString(0), r.GetString(1))); return result;
     }
+    // 목록 캐시용 (v0.7.4): Board를 읽지 않고 저장 상태만 확인합니다. 순서는 List()와 같습니다.
+    public List<(string Id, string Stamp)> ListStamps()
+    {
+        using var c = Open(); using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT id, ifnull(json_extract(json,'$.Revision'),'') || '|' || length(json) || '|' || ifnull(modified,'') FROM boards ORDER BY modified DESC"; using var r = cmd.ExecuteReader();
+        var result = new List<(string, string)>(); while (r.Read()) result.Add((r.GetString(0), r.GetString(1))); return result;
+    }
     public Board? LoadRevision(string id, long revision)
     {
         using var c = Open(); using var cmd = c.CreateCommand(); cmd.CommandText = "SELECT json FROM revisions WHERE board_id=$id AND revision=$revision";

@@ -227,22 +227,24 @@ public class BoardSurface : Canvas
         return arrangeSize;
     }
     public bool IsEditing => active || editor != null;
-    public Board CaptureForSave()
+    // 저장용 캡처 (v0.7.4): UI 스레드에서는 Board를 JSON으로 한 번만 직렬화하고, 화면에만 있는 상태(드래그 이동량·그리는 중인 Stroke·편집 중 Text)는
+    // 값으로 담아 둡니다. 역직렬화와 반영은 Restore에서 하므로 백그라운드 스레드에서 실행할 수 있습니다.
+    public sealed record SaveCapture(string Json, HashSet<string>? DragIds, Vector DragDelta, InkItem? LiveInk, string? EditedTextId, string? EditedText);
+    public SaveCapture CaptureJson() => new(DataJson.Write(Board),
+        dragInk != null && dragDelta.Length > .01 ? dragInk.Select(d => d.Item.Id).ToHashSet() : null, dragDelta,
+        live is { Count: > 0 } ? new InkItem { Id = liveId, Points = live.ToList(), Color = PenColor, Width = PenWidth } : null,
+        editor != null && editedText != null ? editedText.Id : null, editor?.Text);
+    public static Board Restore(SaveCapture capture) => Apply(capture, DataJson.Read<Board>(capture.Json));
+    public static Board Apply(SaveCapture capture, Board snapshot)
     {
-        var snapshot = DataJson.Clone(Board);
         // 드래그 중 저장되면, 화면에 보이는 이동 위치를 저장본에도 반영합니다.
-        if (dragInk != null && dragDelta.Length > .01)
-        {
-            var ids = dragInk.Select(d => d.Item.Id).ToHashSet();
-            foreach (var ink in snapshot.Ink.Where(i => ids.Contains(i.Id))) ink.Points = ink.Points.Select(p => new Sample(p.X + dragDelta.X, p.Y + dragDelta.Y, p.Pressure)).ToList();
-        }
-        if (live is { Count: > 0 }) snapshot.Ink.Add(new() { Id = liveId, Points = live.ToList(), Color = PenColor, Width = PenWidth });
-        if (editor != null && editedText != null)
-        {
-            var text = snapshot.Texts.First(t => t.Id == editedText.Id); text.Text = editor.Text;
-        }
+        if (capture.DragIds != null)
+            foreach (var ink in snapshot.Ink.Where(i => capture.DragIds.Contains(i.Id))) ink.Points = ink.Points.Select(p => new Sample(p.X + capture.DragDelta.X, p.Y + capture.DragDelta.Y, p.Pressure)).ToList();
+        if (capture.LiveInk != null) snapshot.Ink.Add(capture.LiveInk);
+        if (capture.EditedTextId != null) snapshot.Texts.First(t => t.Id == capture.EditedTextId).Text = capture.EditedText ?? "";
         return snapshot;
     }
+    public Board CaptureForSave() => Restore(CaptureJson());
     public void Load(Board board)
     {
         CommitEditor(); Board = board; History.Clear(); Selection.Clear(); SyncView(); Rebuild(); InvalidateVisual();

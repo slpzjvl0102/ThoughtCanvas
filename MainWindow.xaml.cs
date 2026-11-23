@@ -103,11 +103,19 @@ public partial class MainWindow : Window
         if (saving || !dirty) return; saving = true;
         var target = Surface.Board; long revision = target.Revision; bool counted = contentDirty;
         if (counted) target.SavesSinceAi++;
-        SyncEngine.Stamp(target, settings.DeviceId);
-        var snapshot = Surface.CaptureForSave();
+        // v0.7.4: UI 스레드에서는 JSON 직렬화 한 번만 합니다. 변경 해시(Stamp)·역직렬화·저장은 백그라운드에서 하고,
+        // Stamp 결과는 캡처 시점의 Board 기준이므로 이전과 같습니다. 그사이 다른 Stamp가 있었으면 그 값을 유지합니다.
+        var capture = Surface.CaptureJson(); string device = settings.DeviceId; string hashBefore = target.ContentHash;
         try
         {
-            await Task.Run(() => store.Save(snapshot)); lastSave = DateTime.UtcNow;
+            var stamp = await Task.Run(() =>
+            {
+                var snapshot = DataJson.Read<Board>(capture.Json); SyncEngine.Stamp(snapshot, device);
+                var result = (Clock: new Dictionary<string, long>(snapshot.Clock), snapshot.ContentHash, snapshot.LastWriter);
+                store.Save(BoardSurface.Apply(capture, snapshot)); return result;
+            });
+            if (target.ContentHash == hashBefore) { target.Clock = stamp.Clock; target.ContentHash = stamp.ContentHash; target.LastWriter = stamp.LastWriter; }
+            lastSave = DateTime.UtcNow;
             store.SaveSettings(settings);
             if (ReferenceEquals(target, Surface.Board) && target.Revision == revision) { dirty = false; contentDirty = false; }
             SetStatus($"기기에 저장됨 · {DateTime.Now:HH:mm:ss} · AI {target.SavesSinceAi}/{settings.AiEverySaves}");
@@ -402,8 +410,11 @@ public partial class MainWindow : Window
     {
         if (aiBusy) { SetStatus("AI 정리 중입니다."); return; }
         string key = GeminiCredentials.Resolve(settings).Key; if (key.Length == 0) { if (interactive) Dialogs.Message(this, "AI 설정 필요", "GEMINI_API_KEY 또는 GOOGLE_API_KEY 환경 변수를 설정하거나 앱 설정에 Gemini API key를 입력하세요. Model은 설정에서 변경할 수 있습니다. 자동 실행은 설정에서 켤 수 있습니다."); return; }
-        SaveNow(); var target = Surface.Board; var snapshot = DataJson.Clone(target); var regions = ExportService.RenderRegions(snapshot);
-        aiBusy = true; lastAi = DateTime.UtcNow; SetStatus("AI가 원본을 구조화하고 있습니다. 계속 필기하셔도 됩니다.");
+        SaveNow(); var target = Surface.Board; string json = DataJson.Write(target); aiBusy = true;
+        Board snapshot; List<RegionData> regions;
+        try { (snapshot, regions) = await RenderOffUi(() => { var board = DataJson.Read<Board>(json); return (board, ExportService.RenderRegions(board)); }); }
+        catch { aiBusy = false; throw; }
+        lastAi = DateTime.UtcNow; SetStatus("AI가 원본을 구조화하고 있습니다. 계속 필기하셔도 됩니다.");
         try
         {
             var result = await ai.Analyze(snapshot, regions, key, settings.Model, lifetime.Token, full);
@@ -425,15 +436,41 @@ public partial class MainWindow : Window
         var sources = versions.Select(v => store.LoadRevision(snapshot.Id, v)).Where(b => b != null).Cast<Board>();
         return ExportService.Export(snapshot, Path.Combine(store.Root, "Exports"), regions, sources);
     }
+    // WPF 렌더링(구역 PNG·원본 이미지)과 Export 파일 쓰기를 별도 STA 스레드에서 실행합니다 (v0.7.4).
+    // 그 스레드에서 실패하면 이전처럼 UI 스레드에서 다시 실행하므로, 결과와 오류 안내는 이전과 같습니다.
+    internal static Task<T> OnRenderThread<T>(Func<T> work)
+    {
+        var done = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            try { done.SetResult(work()); }
+            catch (Exception ex) { done.SetException(ex); }
+            finally { System.Windows.Threading.Dispatcher.CurrentDispatcher.InvokeShutdown(); }
+        }) { IsBackground = true, Name = "ThoughtCanvas render" };
+        thread.SetApartmentState(ApartmentState.STA); thread.Start(); return done.Task;
+    }
+    private static async Task<T> RenderOffUi<T>(Func<T> work)
+    {
+        try { return await OnRenderThread(work); }
+        catch { return work(); }
+    }
     private async Task Upload(bool interactive)
     {
         if (interactive) deferredSync.Remove(Surface.Board.Id);
-        if (driveBusy) return; lastDrive = DateTime.UtcNow; SaveNow(); var snapshot = DataJson.Clone(Surface.Board); var regions = ExportService.RenderRegions(snapshot);
-        string export = MakeExport(snapshot, regions); driveBusy = true; SetStatus("기기에 저장됨 · Drive 폴더에 저장 중");
+        if (driveBusy) return; lastDrive = DateTime.UtcNow; SaveNow(); string json = DataJson.Write(Surface.Board); driveBusy = true;
+        Board snapshot; string export;
+        try { (snapshot, export) = await RenderOffUi(() => { var board = DataJson.Read<Board>(json); return (board, MakeExport(board, ExportService.RenderRegions(board))); }); }
+        catch { driveBusy = false; throw; }
+        SetStatus("기기에 저장됨 · Drive 폴더에 저장 중");
         try
         {
             string folder = settings.DriveSyncFolder; string device = settings.DeviceId;
-            await Task.Run(() => DriveFolderService.Publish(folder, device, snapshot, export, lifetime.Token));
+            await Task.Run(() =>
+            {
+                DriveFolderService.Publish(folder, device, snapshot, export, lifetime.Token);
+                // 자동 백업용 Export는 Drive 폴더로 복사한 뒤 기기에서 지웁니다 (v0.7.4, 이전: 1분마다 기기에 누적).
+                try { Directory.Delete(export, true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            });
             uploaded[snapshot.Id] = snapshot.Revision; lastCatalog = DateTime.MinValue; // 폴더 정리 후 목록을 바로 다시 읽습니다.
             settings.OfflinePendingBoards.Remove(snapshot.Id); store.SaveSettings(settings);
             SetStatus("Drive 폴더 저장 완료 · v" + snapshot.Revision + " · Cloud 업로드는 Google Drive에서 확인하세요.");
@@ -465,7 +502,7 @@ public partial class MainWindow : Window
         catch (OperationCanceledException) { SetStatus("Drive 폴더 작업이 취소되었습니다."); } catch (Exception ex) { Error(ex); }
     }
     private async void SettingsClick(object sender, RoutedEventArgs e) { try { if (Dialogs.Settings(this, settings)) { uploaded.Clear(); store.SaveSettings(settings); SetStatus("설정을 저장했습니다."); lastConnectivity = DateTime.MinValue; await RefreshDriveBoards(); } } catch (Exception ex) { Error(ex); } }
-    private void HelpClick(object sender, RoutedEventArgs e) => Dialogs.DiagnosticMessage(this, "Prototype 사용 안내 · v0.7.3", "Pen: 필기 / S Pen Button: Pen → Eraser → Lasso\n한 손가락: 이동 / 두 손가락: 이동·확대 / 회전 없음\nMouse: 좌클릭 현재 Tool / 우클릭 이동 / Wheel Zoom\n휠클릭을 누른 채 방향으로 Drag하고 놓으면 Tool 선택\nText Tool: Click하여 생성, 기존 Text Click하여 수정\nLasso: 완전히 포함한 요소 선택, 선택 위 Drag로 이동\nShift+Click: Lasso에서 추가·해제 / Delete: 선택 삭제\nCtrl+Z / Ctrl+Y: 50회 Undo·Redo\n\nAI는 Gemini API key, Drive는 동기화 폴더 경로를 사용합니다. OAuth는 필요 없습니다.\n찾기: 모든 Board·Drive Keyword 검색 및 AI 관련 검색.\nDrive 목록에서 같은 Board를 이어 열 수 있습니다. 작업 → 다른 기기 변경 확인에서 유지·교체·빈 공간 통합을 선택합니다.\n작업 → 공동 편집: 같은 Network의 PC·노트북 연결. Export: PDF·HTML·Markdown·원본. 모바일은 이번 범위에서 제외되었습니다.\n\n" + Surface.PenInputSummary + "\n" + (rawPen?.Summary ?? "HID 초기화 전"));
+    private void HelpClick(object sender, RoutedEventArgs e) => Dialogs.DiagnosticMessage(this, "Prototype 사용 안내 · v0.7.4", "Pen: 필기 / S Pen Button: Pen → Eraser → Lasso\n한 손가락: 이동 / 두 손가락: 이동·확대 / 회전 없음\nMouse: 좌클릭 현재 Tool / 우클릭 이동 / Wheel Zoom\n휠클릭을 누른 채 방향으로 Drag하고 놓으면 Tool 선택\nText Tool: Click하여 생성, 기존 Text Click하여 수정\nLasso: 완전히 포함한 요소 선택, 선택 위 Drag로 이동\nShift+Click: Lasso에서 추가·해제 / Delete: 선택 삭제\nCtrl+Z / Ctrl+Y: 50회 Undo·Redo\n\nAI는 Gemini API key, Drive는 동기화 폴더 경로를 사용합니다. OAuth는 필요 없습니다.\n찾기: 모든 Board·Drive Keyword 검색 및 AI 관련 검색.\nDrive 목록에서 같은 Board를 이어 열 수 있습니다. 작업 → 다른 기기 변경 확인에서 유지·교체·빈 공간 통합을 선택합니다.\n작업 → 공동 편집: 같은 Network의 PC·노트북 연결. Export: PDF·HTML·Markdown·원본. 모바일은 이번 범위에서 제외되었습니다.\n\n" + Surface.PenInputSummary + "\n" + (rawPen?.Summary ?? "HID 초기화 전"));
     private void OpenRadial(Point p) { radialOrigin = p; radialChoice = null; DrawRadial(); }
     private void MoveRadial(Point p)
     {

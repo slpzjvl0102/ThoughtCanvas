@@ -47,6 +47,12 @@ public static class ExportService
     {
         string directory = Path.Combine(root, $"{SafeName(board.Title)}_{board.Id[..8]}", $"v{board.Revision}_{DateTime.UtcNow:yyyyMMdd_HHmmss_fff}");
         Directory.CreateDirectory(directory);
+        // 중간에 실패하면 쓰다 만 Export 폴더를 남기지 않습니다 (v0.7.4).
+        try { Fill(directory, board, regions, sourceVersions); return directory; }
+        catch { try { Directory.Delete(directory, true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { } throw; }
+    }
+    private static void Fill(string directory, Board board, List<RegionData> regions, IEnumerable<Board>? sourceVersions)
+    {
         var versions = (sourceVersions ?? []).GroupBy(b => b.Revision).ToDictionary(g => g.Key, g => g.First());
         Write(directory, "AppData/원본/board.json", DataJson.Write(board));
         foreach (var source in versions.Values) Write(directory, $"AppData/복원 지점/v{source.Revision}.json", DataJson.Write(source));
@@ -96,7 +102,6 @@ public static class ExportService
             body.Append("</section>");
         }
         Write(directory, "구역별 보기/index.html", "<!doctype html><html lang='ko'><meta charset='utf-8'><title>문서 구조별 원본</title><style>body{font-family:'Malgun Gothic';max-width:1100px;margin:32px auto;padding:24px;line-height:1.7}section{border-top:1px solid #ccd;margin-top:40px}img{max-width:100%;height:auto}</style><h1>문서 구조별 원본</h1>" + body + "</html>");
-        return directory;
     }
     private static void Write(string root, string relative, string value) => BoardStore.AtomicWrite(Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar)), value);
     public static string SafeName(string name) { foreach (var c in Path.GetInvalidFileNameChars()) name = name.Replace(c, '_'); return name.Length > 60 ? name[..60] : name; }

@@ -192,20 +192,40 @@ public partial class MainWindow
         }
         catch (Exception ex) { Error(ex); }
     }
+    // 목록 비교용 캐시 (v0.7.4): 로컬 Board는 저장 상태가 같으면, Drive 저장본은 경로가 같으면 다시 읽거나 해시하지 않습니다.
+    // 읽기와 해시 계산은 백그라운드에서 하고, 캐시와 목록은 UI 스레드에서만 바꿉니다. 비교 결과는 이전(Equivalent·Dominates)과 같습니다.
+    private readonly Dictionary<string, (string Stamp, Board Board, string Digest)> localLibrary = [];
+    private readonly Dictionary<string, string> remoteDigests = [];
     private async Task RefreshLibrary()
     {
-        var activePaths = driveEntries.Select(x => x.Path).ToHashSet(); foreach (var path in remoteBundles.Keys.Where(p => !activePaths.Contains(p)).ToList()) remoteBundles.Remove(path);
-        var result = store.List().Select(x => store.Load(x.Id)).Where(x => x != null).Select(x => new LibraryItem(x!, "이 기기", null)).ToList();
-        foreach (var entry in driveEntries)
+        var activePaths = driveEntries.Select(x => x.Path).ToHashSet();
+        foreach (var path in remoteBundles.Keys.Where(p => !activePaths.Contains(p)).ToList()) { remoteBundles.Remove(path); remoteDigests.Remove(path); }
+        var stamps = await Task.Run(store.ListStamps); var entries = driveEntries.ToList();
+        foreach (var id in localLibrary.Keys.Except(stamps.Select(s => s.Id)).ToList()) localLibrary.Remove(id);
+        var staleLocal = stamps.Where(s => !localLibrary.TryGetValue(s.Id, out var cached) || cached.Stamp != s.Stamp).ToList();
+        var staleRemote = entries.Where(e => !remoteDigests.ContainsKey(e.Path)).Select(e => (Entry: e, Cached: remoteBundles.GetValueOrDefault(e.Path))).ToList();
+        var (loaded, read) = await Task.Run(() =>
         {
-            try
+            var boards = new List<(string Id, string Stamp, Board Board, string Digest)>();
+            foreach (var (id, stamp) in staleLocal) if (store.Load(id) is { } board) boards.Add((id, stamp, board, SyncEngine.Digest(board)));
+            var bundles = new List<(string Path, BoardBundle Bundle, string Digest)>();
+            foreach (var (entry, cached) in staleRemote)
             {
-                var bundle = await RemoteBundle(entry);
-                if (result.Any(x => x.Board.Id == bundle.Board.Id && (SyncEngine.Equivalent(x.Board, bundle.Board) || SyncEngine.Dominates(x.Board, bundle.Board)))) continue;
-                result.Add(new(bundle.Board, "Drive · " + DeviceLabel(entry.Device), entry));
+                try { var bundle = cached ?? DriveFolderService.Read(entry.Path); bundles.Add((entry.Path, bundle, SyncEngine.Digest(bundle.Board))); }
+                catch (Exception ex) when (ex is IOException or InvalidDataException or System.Text.Json.JsonException) { }
             }
-            catch (Exception ex) when (ex is IOException or InvalidDataException or System.Text.Json.JsonException) { }
+            return (boards, bundles);
+        });
+        foreach (var board in loaded) localLibrary[board.Id] = (board.Stamp, board.Board, board.Digest);
+        foreach (var remote in read) if (activePaths.Contains(remote.Path)) { remoteBundles[remote.Path] = remote.Bundle; remoteDigests[remote.Path] = remote.Digest; }
+        var items = stamps.Where(s => localLibrary.ContainsKey(s.Id)).Select(s => (Item: new LibraryItem(localLibrary[s.Id].Board, "이 기기", null), localLibrary[s.Id].Digest)).ToList();
+        foreach (var entry in entries)
+        {
+            if (!remoteBundles.TryGetValue(entry.Path, out var bundle) || !remoteDigests.TryGetValue(entry.Path, out var digest)) continue;
+            if (items.Any(x => x.Item.Board.Id == bundle.Board.Id && (x.Digest == digest || SyncEngine.Dominates(x.Item.Board, bundle.Board)))) continue;
+            items.Add((new(bundle.Board, "Drive · " + DeviceLabel(entry.Device), entry), digest));
         }
+        var result = items.Select(x => x.Item).ToList();
         library = result; UpdateBoards();
         if (initialized)
         {

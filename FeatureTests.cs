@@ -156,6 +156,18 @@ public static class FeatureTests
             }
             finally { Environment.SetEnvironmentVariable("THOUGHTCANVAS_DATA", previous); }
         });
+        test("Export: 별도 렌더 스레드 구역 PNG·Export 파일 동일", () =>
+        {
+            var board = new Board { Title = "렌더 스레드", Ink = [new InkItem { Points = Enumerable.Range(0, 60).Select(i => new Sample(i * 9, 40 + i % 7, .6f)).ToList() }],
+                Texts = [new TextItem { X = 30, Y = 120, Text = "가나다 Text", FontSize = 22, Width = 160 }] };
+            var onUi = ExportService.RenderRegions(board);
+            var offUi = MainWindow.OnRenderThread(() => ExportService.RenderRegions(board)).GetAwaiter().GetResult();
+            assert(onUi.Count == offUi.Count && onUi.Zip(offUi).All(p => p.First.Name == p.Second.Name && p.First.Png.SequenceEqual(p.Second.Png)), "렌더 스레드 PNG 불일치");
+            string exports = Path.Combine(root, "render-thread");
+            string a = ExportService.Export(board, Path.Combine(exports, "ui"), onUi), b = MainWindow.OnRenderThread(() => ExportService.Export(board, Path.Combine(exports, "thread"), offUi)).GetAwaiter().GetResult();
+            string[] Files(string d) => Directory.GetFiles(d, "*", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(d, f)).Order().ToArray();
+            assert(Files(a).SequenceEqual(Files(b)) && Files(a).All(f => File.ReadAllBytes(Path.Combine(a, f)).SequenceEqual(File.ReadAllBytes(Path.Combine(b, f)))), "렌더 스레드 Export 파일 불일치");
+        });
         test("Notion: 긴 문서·Unicode 경계·80개 Batch·구조 보존", () =>
         {
             var b = Sample(); b.UserDocument = string.Concat(Enumerable.Repeat("한글🧊", 1000));
