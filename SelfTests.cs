@@ -75,7 +75,16 @@ public static class SelfTests
         });
         Test("Canvas 원본 Snapshot 독립성", () =>
         {
-            var b = new Board { Ink = [Line()] }; var snapshot = CanvasHistory.Capture(b); b.Ink[0].Points.Clear(); Assert(snapshot.Ink[0].Points.Count == 101, "이력과 원본이 같은 객체를 참조함");
+            // 이력은 얕게 복사하므로, 크기 변경이 이력 속 원래 객체를 바꾸지 않는지 확인합니다.
+            var line = Line(); var note = new TextItem { X = 10, Y = 10, Text = "원본", FontSize = 20, Width = 60 };
+            var surface = new BoardSurface(); surface.Load(new Board { Ink = [line], Texts = [note] });
+            string X(BoardSurface s) => $"{s.Board.Ink[0].Points[100].X:F1},{s.Board.Texts[0].X:F1},{s.Board.Texts[0].FontSize:F1}";
+            string start = X(surface); surface.Selection.Add(line.Id); surface.Selection.Add(note.Id);
+            surface.ResizeSelection(2); string once = X(surface); surface.Selection.Add(line.Id); surface.Selection.Add(note.Id); surface.ResizeSelection(2);
+            Assert(line.Points[100].X == 200 && note.FontSize == 20, "이력과 원본이 같은 객체를 참조함");
+            surface.Undo(); Assert(X(surface) == once, "1단계 Undo 불일치"); surface.Undo(); Assert(X(surface) == start, "원본 복원 실패");
+            surface.Redo(); surface.Redo(); surface.Undo(); Assert(X(surface) == once, "Redo 후 Undo 불일치");
+            var snapshot = CanvasHistory.Capture(surface.Board); Assert(ReferenceEquals(snapshot.Ink[0], surface.Board.Ink[0]) && snapshot.Ink != surface.Board.Ink, "이력 목록 얕은 복사 실패");
         });
         Test("이전 취소·보류 아이디어와 이유 재분석 시 보존", () =>
         {

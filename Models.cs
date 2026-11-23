@@ -127,7 +127,8 @@ public class CanvasHistory
     private readonly List<CanvasSnapshot> redo = [];
     public int UndoCount => undo.Count;
     public int RedoCount => redo.Count;
-    public static CanvasSnapshot Capture(Board board) => DataJson.Clone(new CanvasSnapshot(board.Ink, board.Texts));
+    // 목록만 얕게 복사합니다. 요소는 불변으로 취급하고, 바꿀 때는 BoardSurface가 복제본으로 교체합니다 (v0.6.7).
+    public static CanvasSnapshot Capture(Board board) => new([.. board.Ink], [.. board.Texts]);
     public void Push(CanvasSnapshot before) { undo.Add(before); if (undo.Count > 50) undo.RemoveAt(0); redo.Clear(); }
     public bool Undo(Board board) => Move(undo, redo, board);
     public bool Redo(Board board) => Move(redo, undo, board);
@@ -135,7 +136,7 @@ public class CanvasHistory
     {
         if (from.Count == 0) return false;
         to.Add(Capture(board)); var state = from[^1]; from.RemoveAt(from.Count - 1);
-        board.Ink = DataJson.Clone(state.Ink); board.Texts = DataJson.Clone(state.Texts); return true;
+        board.Ink = [.. state.Ink]; board.Texts = [.. state.Texts]; return true;
     }
     public void Clear() { undo.Clear(); redo.Clear(); }
 }

@@ -418,6 +418,7 @@ public class BoardSurface : Canvas
     {
         draggingSelection = true; dragDelta = new Vector(); dragTransform.X = dragTransform.Y = 0;
         // 원래 좌표를 한 번만 확보합니다. 드래그 중에는 Points 목록을 바꾸지 않으므로 참조를 그대로 보관합니다.
+        DetachSelection(); // Undo 이력이 가진 원래 객체는 건드리지 않고, 복제본을 옮깁니다.
         dragInk = [.. Board.Ink.Where(i => Selection.Contains(i.Id)).Select(i => (i, i.Points))];
         dragTexts = [.. Board.Texts.Where(t => Selection.Contains(t.Id)).Select(t => (t, t.X, t.Y))];
         foreach (var (item, _) in dragInk) inkLayer.SetTransform(item.Id, dragTransform);
@@ -578,9 +579,21 @@ public class BoardSurface : Canvas
         else { Board.Zoom = Math.Clamp(Math.Min((ActualWidth - 100) / Math.Max(100, b.Width), (ActualHeight - 100) / Math.Max(100, b.Height)), .08, 2); Board.ViewX = (ActualWidth - b.Width * Board.Zoom) / 2 - b.X * Board.Zoom; Board.ViewY = (ActualHeight - b.Height * Board.Zoom) / 2 - b.Y * Board.Zoom; }
         UpdateView();
     }
+    // Undo 이력은 Board 목록만 얕게 복사합니다 (v0.6.7). 대신 기존 요소를 그 자리에서 바꾸기 전에
+    // 복제본으로 교체해서, 이력이 참조하는 원래 객체가 바뀌지 않도록 합니다.
+    private void DetachSelection()
+    {
+        for (int i = 0; i < Board.Ink.Count; i++) if (Selection.Contains(Board.Ink[i].Id)) Board.Ink[i] = DataJson.Clone(Board.Ink[i]);
+        for (int i = 0; i < Board.Texts.Count; i++) if (Selection.Contains(Board.Texts[i].Id)) Board.Texts[i] = DataJson.Clone(Board.Texts[i]);
+    }
+    private TextItem DetachText(TextItem text)
+    {
+        int index = Board.Texts.IndexOf(text); if (index < 0) return text;
+        var copy = DataJson.Clone(text); Board.Texts[index] = copy; return copy;
+    }
     private void OpenEditor(TextItem text)
     {
-        editedText = text; var p = ToScreen(new(text.X, text.Y));
+        text = DetachText(text); editedText = text; var p = ToScreen(new(text.X, text.Y));
         // 자동 줄바꿈 없이 입력한 만큼 늘어납니다. 이전 버전의 자동 줄바꿈 Text는 보이던 모양대로 줄을 나눠 엽니다.
         editorInitialText = HardWrap(text); editorInitialFontSize = text.FontSize;
         editor = new TextBox { Text = editorInitialText, FontFamily = new FontFamily("Malgun Gothic"), FontSize = text.FontSize * Board.Zoom, MinWidth = 80, MinHeight = 35, AcceptsReturn = true, TextWrapping = TextWrapping.NoWrap, HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden, BorderBrush = Brushes.Teal, BorderThickness = new Thickness(1), Padding = new Thickness(2), Background = Brushes.White };
@@ -600,7 +613,10 @@ public class BoardSurface : Canvas
         // 내용·크기가 그대로면 원래 Text와 너비를 유지합니다 (열어 보기만 해도 Undo 기록이 생기지 않도록).
         if (box.Text != editorInitialText || text.FontSize != editorInitialFontSize) { text.Text = box.Text; FitTextWidth(text); }
         Children.Remove(box); if (string.IsNullOrWhiteSpace(text.Text)) Board.Texts.Remove(text);
-        if (before != null && DataJson.Write(before) != DataJson.Write(CanvasHistory.Capture(Board))) { History.Push(before); Changed?.Invoke(); }
+        // Board 전체를 직렬화해 비교하지 않고, 편집한 Text의 변화만 봅니다 (새 Text를 비운 채 닫으면 기록 없음).
+        bool isNew = before != null && !before.Texts.Any(t => t.Id == text.Id);
+        bool changed = (box.Text != editorInitialText || text.FontSize != editorInitialFontSize) && !(isNew && string.IsNullOrWhiteSpace(text.Text));
+        if (before != null && changed) { History.Push(before); Changed?.Invoke(); }
         before = null; Redraw(); ToolChanged?.Invoke();
     }
     public void Undo() { CommitEditor(); EndGesture(); if (History.Undo(Board)) { Selection.Clear(); Rebuild(); Changed?.Invoke(); } }
@@ -620,7 +636,7 @@ public class BoardSurface : Canvas
         if (Selection.Count == 0) return; CommitEditor(); var b = Rect.Empty;
         foreach (var i in Board.Ink.Where(i => Selection.Contains(i.Id))) b.Union(strokes[i.Id].GetBounds());
         foreach (var t in Board.Texts.Where(t => Selection.Contains(t.Id))) b.Union(TextBounds(t));
-        if (b.IsEmpty) return; History.Push(CanvasHistory.Capture(Board));
+        if (b.IsEmpty) return; History.Push(CanvasHistory.Capture(Board)); DetachSelection();
         // 선택 영역의 중심을 기준으로 확대·축소합니다 (v0.6.5, 이전: 좌상단 기준).
         double cx = b.X + b.Width / 2, cy = b.Y + b.Height / 2;
         foreach (var i in Board.Ink.Where(i => Selection.Contains(i.Id)))
