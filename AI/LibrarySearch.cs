@@ -27,7 +27,7 @@ public static class LibrarySearch
     public static List<SearchHit> Keyword(IEnumerable<SearchHit> candidates, string query, string? topic, string? category) => candidates.Where(h =>
         (topic == null || h.Idea.Topic == topic) && (category == null || h.Idea.Category == category) &&
         string.Join(" ", h.Item.Board.Title, h.Idea.Content, h.Idea.Context, h.Idea.Reason, h.Idea.Topic, h.Idea.Category).Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
-    public static async Task<List<SearchHit>> Related(List<SearchHit> candidates, string query, string key, string model, CancellationToken token, HttpClient? http = null)
+    public static async Task<List<SearchHit>> Related(List<SearchHit> candidates, string query, string key, string model, CancellationToken token, HttpClient? http = null, bool autoSwitch = false)
     {
         if (string.IsNullOrWhiteSpace(key)) throw new InvalidOperationException("Gemini API key를 설정하세요.");
         if (!GeminiModels.IsValid(model)) throw new InvalidOperationException("Model 설정을 확인하세요.");
@@ -42,7 +42,7 @@ public static class LibrarySearch
                 generationConfig = new { thinkingConfig = new { thinkingLevel = "LOW" }, responseMimeType = "application/json", responseJsonSchema = new
                 { type = "array", items = new { type = "object", properties = new { index = new { type = "integer" }, reason = new { type = "string" } }, required = new[] { "index", "reason" } } } }
             };
-            using var response = (await GeminiModels.Send(client, model, key, JsonSerializer.Serialize(body), token)).Response;
+            using var response = (await GeminiModels.Send(client, model, key, JsonSerializer.Serialize(body), token, autoSwitch)).Response;
             if (!response.IsSuccessStatusCode) throw new InvalidOperationException($"AI 관련 검색 실패 ({(int)response.StatusCode}). Keyword 결과는 유지됩니다.");
             using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(token));
             var candidate = doc.RootElement.GetProperty("candidates")[0];

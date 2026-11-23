@@ -55,8 +55,27 @@ public static class Dialogs
         Label($"현재 Key 출처: {GeminiCredentials.Resolve(settings).Source} · Key 값은 표시하지 않습니다.");
         Label("환경 변수 우선: GEMINI_API_KEY → GOOGLE_API_KEY → 앱에 저장한 Key. 각 변수는 User → Machine → Process 순서로 확인합니다. 환경 변수를 사용하면 아래 Key는 비워두셔도 됩니다.");
         Label("Gemini API key · 이 Windows 사용자에게 암호화하여 Local 저장"); var key = new PasswordBox { Password = Secrets.Unprotect(settings.ProtectedGeminiApiKey), Padding = new Thickness(8) }; stack.Children.Add(key);
-        Label("Model ID (기본: gemini-3.8-flash) · 쉼표로 대체 Model을 이어 쓰면 사용량 한도(429) 시 순서대로 전환합니다. 예: gemini-3.8-flash, gemini-3.5-flash-lite");
-        var model = new TextBox { Text = settings.Model, Padding = new Thickness(8) }; stack.Children.Add(model);
+        Label("기본 Model (기본: gemini-3.8-flash) · 목록에서 선택하세요. '목록 불러오기'를 누르면 이 API key로 쓸 수 있는 Model을 성능 높은 순으로 보여줍니다.");
+        var model = new ComboBox { IsEditable = true, Padding = new Thickness(6), ItemsSource = GeminiModels.ByPerformance([settings.Model, ThoughtCanvas.Settings.DefaultModel]) };
+        model.Text = settings.Model; stack.Children.Add(model);
+        var loadModels = new Button { Content = "목록 불러오기", Padding = new Thickness(15, 6, 15, 6), Margin = new Thickness(0, 6, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
+        loadModels.Click += async (_, _) =>
+        {
+            string apiKey = key.Password.Trim().Length > 0 ? key.Password.Trim() : GeminiCredentials.Resolve(settings).Key;
+            if (apiKey.Length == 0) { Message(window, "API key 필요", "Model 목록을 불러오려면 Gemini API key를 먼저 입력하세요."); return; }
+            loadModels.IsEnabled = false; loadModels.Content = "불러오는 중…"; string current = model.Text;
+            try
+            {
+                using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+                var list = await GeminiModels.Available(http, apiKey, CancellationToken.None);
+                if (list.Count == 0) Message(window, "Model 목록", "이 API key로 쓸 수 있는 Gemini 3 Model을 찾지 못했습니다.");
+                else { model.ItemsSource = list; model.Text = current; }
+            }
+            catch (Exception ex) { Message(window, "Model 목록", ex.Message.Replace(apiKey, "[API key 숨김]")); }
+            finally { loadModels.IsEnabled = true; loadModels.Content = "목록 불러오기"; }
+        };
+        stack.Children.Add(loadModels);
+        var autoSwitch = new CheckBox { Content = "사용량 한도(429) 시 다른 Model로 자동 전환 · 성능 높은 순 (Pro → Flash → Flash-Lite)", IsChecked = settings.AutoSwitchModel, Margin = new Thickness(0, 8, 0, 0) }; stack.Children.Add(autoSwitch);
         Label("현재는 Image·Structured outputs·LOW thinking을 지원하는 Gemini 3 계열을 사용하세요. Model ID는 Google AI Studio 기준이며 계정의 사용 권한에 따릅니다. 원본 Image와 맥락을 Google로 전송합니다.");
         var autoAi = new CheckBox { Content = "자동 AI 문서화 사용 (Google API 한도·Credits 사용)", IsChecked = settings.AutomaticAi, Margin = new Thickness(0, 8, 0, 8) }; stack.Children.Add(autoAi);
         Label("Google AI Studio에서 발급한 API key를 입력하세요. Google AI Pro 구독만으로 API가 무제한 제공되지는 않습니다. 무료 한도·Cloud credits 적용은 Google Billing 설정에 따릅니다. Drive 폴더 저장에는 API Key가 필요 없습니다.");
@@ -76,7 +95,7 @@ public static class Dialogs
             if (!ThoughtCanvas.Settings.IsSupportedModel(model.Text.Trim())) { Message(window, "Model 확인", "gemini-3.8-flash와 같은 Gemini 3 계열 Model ID를 입력하세요."); return; }
             if (!int.TryParse(count.Text, out int n) || n < 1 || n > 1000) { Message(window, "입력 확인", "저장 횟수는 1~1000 사이로 입력하세요."); return; }
             if (folder.Text.Trim().Length > 0 && !Path.IsPathFullyQualified(folder.Text.Trim())) { Message(window, "폴더 확인", "Drive 폴더의 전체 경로를 입력하거나 비워 두세요."); return; }
-            settings.Model = model.Text.Trim();
+            settings.Model = model.Text.Trim(); settings.AutoSwitchModel = autoSwitch.IsChecked == true;
             if (!string.IsNullOrWhiteSpace(notionParent.Text) && !Guid.TryParse(notionParent.Text.Trim(), out _)) { Message(window, "Page ID 확인", "Notion Page ID를 입력하세요 (URL의 32자리 ID)."); return; }
             settings.ProtectedNotionToken = Secrets.Protect(notionToken.Password.Trim()); settings.NotionParentId = notionParent.Text.Trim();
             settings.DeviceName = string.IsNullOrWhiteSpace(device.Text) ? Environment.MachineName : device.Text.Trim(); settings.ProtectedGeminiApiKey = Secrets.Protect(key.Password.Trim()); settings.AutomaticAi = autoAi.IsChecked == true; settings.AiEverySaves = n;

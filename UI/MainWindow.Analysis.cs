@@ -21,7 +21,7 @@ public partial class MainWindow : Window
         lastAi = DateTime.UtcNow; SetStatus("AI가 원본을 구조화하고 있습니다. 계속 필기하셔도 됩니다.");
         try
         {
-            var result = await ai.Analyze(snapshot, regions, key, settings.Model, lifetime.Token, full);
+            var result = await ai.Analyze(snapshot, regions, key, settings.Model, lifetime.Token, full, settings.AutoSwitchModel);
             if (Surface.Board.Id == snapshot.Id) { SaveDocumentIfNeeded(); target = Surface.Board; } else target = store.Load(snapshot.Id) ?? target;
             AiService.Apply(target, result); target.SavesSinceAi = Math.Max(0, target.SavesSinceAi - snapshot.SavesSinceAi); target.Revision++; target.ModifiedUtc = DateTime.UtcNow;
             TopicDocuments.Refresh(target); SyncEngine.Stamp(target, settings.DeviceId); store.Save(target);
