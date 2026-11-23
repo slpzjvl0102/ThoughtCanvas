@@ -30,7 +30,7 @@ public static class LibrarySearch
     public static async Task<List<SearchHit>> Related(List<SearchHit> candidates, string query, string key, string model, CancellationToken token, HttpClient? http = null)
     {
         if (string.IsNullOrWhiteSpace(key)) throw new InvalidOperationException("Gemini API key를 설정하세요.");
-        if (!Settings.IsSupportedModel(model)) throw new InvalidOperationException("Model 설정을 확인하세요.");
+        if (!GeminiModels.IsValid(model)) throw new InvalidOperationException("Model 설정을 확인하세요.");
         using var owned = http == null ? new HttpClient { Timeout = TimeSpan.FromMinutes(3) } : null;
         var client = http ?? owned!; var results = new List<SearchHit>();
         foreach (var chunk in candidates.Chunk(40))
@@ -42,9 +42,7 @@ public static class LibrarySearch
                 generationConfig = new { thinkingConfig = new { thinkingLevel = "LOW" }, responseMimeType = "application/json", responseJsonSchema = new
                 { type = "array", items = new { type = "object", properties = new { index = new { type = "integer" }, reason = new { type = "string" } }, required = new[] { "index", "reason" } } } }
             };
-            using var request = new HttpRequestMessage(HttpMethod.Post, $"https://generativelanguage.googleapis.com/v1beta/models/{Uri.EscapeDataString(model)}:generateContent");
-            request.Headers.Add("x-goog-api-key", key); request.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
-            using var response = await client.SendAsync(request, token);
+            using var response = (await GeminiModels.Send(client, model, key, JsonSerializer.Serialize(body), token)).Response;
             if (!response.IsSuccessStatusCode) throw new InvalidOperationException($"AI 관련 검색 실패 ({(int)response.StatusCode}). Keyword 결과는 유지됩니다.");
             using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(token));
             var candidate = doc.RootElement.GetProperty("candidates")[0];

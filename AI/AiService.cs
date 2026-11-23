@@ -8,6 +8,8 @@ public class AiService
 {
     private readonly HttpClient client;
     public AiService(HttpClient? client = null) => this.client = client ?? new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
+    // 마지막 요청에 실제로 사용한 Model (대체 Model로 전환되었는지 표시용)
+    public string LastModel { get; private set; } = "";
     private static object Str() => new { type = "string" };
     private static object Strings() => new { type = "array", items = Str() };
     private static object Obj(Dictionary<string, object> properties) => new { type = "object", properties, required = properties.Keys.ToArray(), additionalProperties = false };
@@ -55,7 +57,7 @@ public class AiService
             Reviews prioritize word, classification, connection, contradiction. Ask specific actionable questions. Preserve unresolved questions; exclude already resolved questions unless new evidence conflicts.
             """;
         if (string.IsNullOrWhiteSpace(key)) throw new InvalidOperationException("설정에서 Gemini API key를 입력하세요.");
-        if (!Settings.IsSupportedModel(model))
+        if (!GeminiModels.IsValid(model))
             throw new InvalidOperationException("Gemini 3 계열 Model 설정을 확인하세요.");
         var body = new
         {
@@ -69,10 +71,8 @@ public class AiService
                 responseMimeType = "application/json", responseJsonSchema = Schema()
             }
         };
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"https://generativelanguage.googleapis.com/v1beta/models/{Uri.EscapeDataString(model)}:generateContent");
-        request.Headers.Add("x-goog-api-key", key);
-        request.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
-        using var response = await client.SendAsync(request, token);
+        var (sent, usedModel) = await GeminiModels.Send(client, model, key, JsonSerializer.Serialize(body), token);
+        using var response = sent; LastModel = usedModel;
         var payload = await response.Content.ReadAsStringAsync(token);
         if (!response.IsSuccessStatusCode)
         {
@@ -85,7 +85,7 @@ public class AiService
                 401 or 403 => "API key와 해당 Google 프로젝트의 Gemini API 권한을 확인하세요.",
                 402 => "Google AI Studio의 Billing·Credits 잔액을 확인하세요.",
                 404 => "이 프로젝트에서 사용할 수 있는 Model인지 확인하세요.",
-                429 => "요청 한도 또는 Quota를 초과했습니다. AI Studio에서 한도를 확인한 후 다시 실행하세요.",
+                429 => GeminiModels.Chain(model).Count > 1 ? "설정한 모든 Model의 요청 한도 또는 Quota를 초과했습니다. AI Studio에서 한도를 확인한 후 다시 실행하세요." : "요청 한도 또는 Quota를 초과했습니다. 설정의 Model ID에 쉼표로 대체 Model을 추가하거나 AI Studio에서 한도를 확인하세요.",
                 >= 500 => "Google 서비스가 일시적으로 응답하지 않습니다. 잠시 후 다시 실행하세요.",
                 _ => "연결 설정을 확인하세요."
             };

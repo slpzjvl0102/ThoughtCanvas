@@ -55,7 +55,7 @@ public static class Dialogs
         Label($"현재 Key 출처: {GeminiCredentials.Resolve(settings).Source} · Key 값은 표시하지 않습니다.");
         Label("환경 변수 우선: GEMINI_API_KEY → GOOGLE_API_KEY → 앱에 저장한 Key. 각 변수는 User → Machine → Process 순서로 확인합니다. 환경 변수를 사용하면 아래 Key는 비워두셔도 됩니다.");
         Label("Gemini API key · 이 Windows 사용자에게 암호화하여 Local 저장"); var key = new PasswordBox { Password = Secrets.Unprotect(settings.ProtectedGeminiApiKey), Padding = new Thickness(8) }; stack.Children.Add(key);
-        Label("Model ID (기본: gemini-3.8-flash)");
+        Label("Model ID (기본: gemini-3.8-flash) · 쉼표로 대체 Model을 이어 쓰면 사용량 한도(429) 시 순서대로 전환합니다. 예: gemini-3.8-flash, gemini-3.5-flash-lite");
         var model = new TextBox { Text = settings.Model, Padding = new Thickness(8) }; stack.Children.Add(model);
         Label("현재는 Image·Structured outputs·LOW thinking을 지원하는 Gemini 3 계열을 사용하세요. Model ID는 Google AI Studio 기준이며 계정의 사용 권한에 따릅니다. 원본 Image와 맥락을 Google로 전송합니다.");
         var autoAi = new CheckBox { Content = "자동 AI 문서화 사용 (Google API 한도·Credits 사용)", IsChecked = settings.AutomaticAi, Margin = new Thickness(0, 8, 0, 8) }; stack.Children.Add(autoAi);

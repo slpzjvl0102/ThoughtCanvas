@@ -155,7 +155,9 @@ public class Settings
     public const string DefaultModel = "gemini-3.8-flash";
     public string ProtectedGeminiApiKey { get; set; } = "";
     public string Model { get; set; } = DefaultModel;
-    public static bool IsSupportedModel(string model) => System.Text.RegularExpressions.Regex.IsMatch(model, @"^gemini-3[.a-zA-Z0-9-]*$");
+    // 쉼표로 이어 쓴 대체 Model 목록도 허용합니다 (각 항목이 Gemini 3 계열이어야 함).
+    public static bool IsSupportedModel(string model) => GeminiModels.Chain(model) is { Count: > 0 } chain && chain.All(IsSingleModel);
+    public static bool IsSingleModel(string model) => System.Text.RegularExpressions.Regex.IsMatch(model, @"^gemini-3[.a-zA-Z0-9-]*$");
     public bool MigrateAiProvider()
     {
         if (Model.StartsWith("gemini-3", StringComparison.Ordinal)) return false;
