@@ -39,6 +39,18 @@ public class BoardStore
         using var c = Open(); using var cmd = c.CreateCommand();
         cmd.CommandText = "PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS boards(id TEXT PRIMARY KEY,title TEXT NOT NULL,json TEXT NOT NULL,modified TEXT NOT NULL); CREATE TABLE IF NOT EXISTS revisions(board_id TEXT NOT NULL,revision INTEGER NOT NULL,json TEXT NOT NULL,PRIMARY KEY(board_id,revision));";
         cmd.ExecuteNonQuery();
+        MarkLegacyBackups(c);
+    }
+    // v0.7.7 이전에 만든 보관용 원본은 표시가 없으므로 제목으로 찾아 한 번만 보관 표시를 합니다.
+    // Archived 값이 이미 있는 Board(새 버전이 저장했거나 사용자가 보관 해제한 Board)는 건드리지 않습니다. 내용·Revision은 바꾸지 않습니다.
+    public const string MergeBackupMarker = " · 통합 전 보관 ";
+    public const string RemoteBackupSuffix = " · 다른 기기 원본 보관";
+    public static bool IsBackupTitle(string title) => title.Contains(MergeBackupMarker, StringComparison.Ordinal) || title.EndsWith(RemoteBackupSuffix, StringComparison.Ordinal);
+    private static void MarkLegacyBackups(SqliteConnection c)
+    {
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "UPDATE boards SET json=json_set(json,'$.Archived',json('true')) WHERE json_type(json,'$.Archived') IS NULL AND (instr(title,$merge)>0 OR substr(title,-length($remote))=$remote)";
+        cmd.Parameters.AddWithValue("$merge", MergeBackupMarker); cmd.Parameters.AddWithValue("$remote", RemoteBackupSuffix); cmd.ExecuteNonQuery();
     }
     private SqliteConnection Open() { var c = new SqliteConnection(connectionString); c.Open(); using var cmd = c.CreateCommand(); cmd.CommandText = "PRAGMA synchronous=FULL;"; cmd.ExecuteNonQuery(); return c; }
     public void Save(Board board)
@@ -57,6 +69,28 @@ public class BoardStore
     {
         using var c = Open(); using var cmd = c.CreateCommand(); cmd.CommandText = "SELECT id,title FROM boards ORDER BY modified DESC"; using var r = cmd.ExecuteReader();
         var result = new List<(string, string)>(); while (r.Read()) result.Add((r.GetString(0), r.GetString(1))); return result;
+    }
+    // Board 목록과 보관 여부 (v0.7.7). 순서는 List()와 같습니다.
+    public List<(string Id, string Title, bool Archived, DateTime ModifiedUtc)> ListEntries()
+    {
+        using var c = Open(); using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT id,title,ifnull(json_extract(json,'$.Archived'),0),modified FROM boards ORDER BY modified DESC"; using var r = cmd.ExecuteReader();
+        var result = new List<(string, string, bool, DateTime)>();
+        while (r.Read()) result.Add((r.GetString(0), r.GetString(1), r.GetInt64(2) != 0, DateTime.TryParse(r.GetString(3), null, System.Globalization.DateTimeStyles.RoundtripKind, out var m) ? m : DateTime.MinValue));
+        return result;
+    }
+    // Board와 모든 복원 지점을 지웁니다. 되돌릴 수 없으므로 호출 전에 사용자 확인을 받습니다.
+    public void Delete(string id)
+    {
+        using var c = Open(); using var tx = c.BeginTransaction(); using var cmd = c.CreateCommand(); cmd.Transaction = tx;
+        cmd.CommandText = "DELETE FROM boards WHERE id=$id; DELETE FROM revisions WHERE board_id=$id;"; cmd.Parameters.AddWithValue("$id", id); cmd.ExecuteNonQuery(); tx.Commit();
+    }
+    // 다른 기기에서 삭제한 Board를 이 기기에서 그 뒤에 고친 경우, 기록을 모두 유지한 채 새 ID의 보관 Board로 옮깁니다.
+    public void MoveToArchive(string id, string newId, string title)
+    {
+        using var c = Open(); using var tx = c.BeginTransaction(); using var cmd = c.CreateCommand(); cmd.Transaction = tx;
+        cmd.CommandText = "UPDATE boards SET id=$new,title=$title,json=json_set(json,'$.Id',$new,'$.Title',$title,'$.Archived',json('true')) WHERE id=$id; UPDATE revisions SET board_id=$new,json=json_set(json,'$.Id',$new) WHERE board_id=$id;";
+        cmd.Parameters.AddWithValue("$id", id); cmd.Parameters.AddWithValue("$new", newId); cmd.Parameters.AddWithValue("$title", title); cmd.ExecuteNonQuery(); tx.Commit();
     }
     // 목록 캐시용 (v0.7.4): Board를 읽지 않고 저장 상태만 확인합니다. 순서는 List()와 같습니다.
     public List<(string Id, string Stamp)> ListStamps()

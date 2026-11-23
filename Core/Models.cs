@@ -105,6 +105,8 @@ public class Board
     public int SchemaVersion { get; set; } = 1;
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Title { get; set; } = "새로운 생각";
+    // 동기화 충돌·통합 때 만든 보관용 원본입니다 (v0.7.7). 데이터는 그대로 두고 Board 목록에서만 숨기며, 보관함에서 엽니다.
+    public bool Archived { get; set; }
     public long Revision { get; set; }
     public DateTime ModifiedUtc { get; set; } = DateTime.UtcNow;
     public List<InkItem> Ink { get; set; } = [];
@@ -143,6 +145,8 @@ public class CanvasHistory
 public class Settings
 {
     public HashSet<string> OfflinePendingBoards { get; set; } = [];
+    // 삭제했지만 아직 Drive 폴더에 삭제 기록(tombstone)을 남기지 못한 Board (ID → 삭제 시각 UTC)
+    public Dictionary<string, DateTime> PendingBoardDeletes { get; set; } = [];
     public string NotionParentId { get; set; } = "";
     public string ProtectedNotionToken { get; set; } = "";
     public string DeviceId { get; set; } = Guid.NewGuid().ToString("N");

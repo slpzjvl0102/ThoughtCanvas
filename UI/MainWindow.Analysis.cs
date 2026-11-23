@@ -61,7 +61,9 @@ public partial class MainWindow : Window
     private async Task Upload(bool interactive)
     {
         if (interactive) deferredSync.Remove(Surface.Board.Id);
-        if (driveBusy) return; lastDrive = DateTime.UtcNow; SaveNow(); string json = DataJson.Write(Surface.Board); driveBusy = true;
+        if (driveBusy) return; lastDrive = DateTime.UtcNow; SaveNow();
+        // 삭제 기록이 있는 Board는 Drive 폴더에 다시 올리지 않습니다 (되살아나지 않도록).
+        if (deletedBoards.ContainsKey(Surface.Board.Id) || settings.PendingBoardDeletes.ContainsKey(Surface.Board.Id)) { uploaded[Surface.Board.Id] = Surface.Board.Revision; return; } string json = DataJson.Write(Surface.Board); driveBusy = true;
         Board snapshot; string export;
         try { (snapshot, export) = await RenderOffUi(() => { var board = DataJson.Read<Board>(json); return (board, MakeExport(board, ExportService.RenderRegions(board))); }); }
         catch { driveBusy = false; throw; }

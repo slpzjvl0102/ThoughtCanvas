@@ -50,7 +50,8 @@ public partial class MainWindow
     private List<LibraryItem> library = [];
     private List<SearchHit> SearchCandidates()
     {
-        var list = library.Where(x => x.Board.Id != Surface.Board.Id || x.Remote != null).ToList();
+        // 보관용 원본은 같은 내용이 겹쳐 보이므로 검색 대상에서 뺍니다 (보관함에서 열면 현재 Board로 검색됩니다).
+        var list = library.Where(x => (x.Board.Id != Surface.Board.Id || x.Remote != null) && !x.Board.Archived && !(x.Remote?.Archived ?? false)).ToList();
         list.Add(new(Surface.Board, "현재 Board", null));
         if (SearchAll?.IsChecked != true) list = list.Where(x => x.Board.Id == Surface.Board.Id && x.Remote == null).ToList();
         return LibrarySearch.Candidates(list);
@@ -154,11 +155,11 @@ public partial class MainWindow
             var localBackup = SyncEngine.Backup(local);
             var sourceVersions = (local.Analysis?.Ideas.Select(i => i.SourceRevision) ?? []).Append(local.Analysis?.SourceRevision ?? local.Revision).Distinct();
             SaveBundle(new(localBackup, sourceVersions.Select(v => store.LoadRevision(local.Id, v)).Where(b => b != null).Cast<Board>().ToList()), localBackup.Id);
-            var backupId = Guid.NewGuid().ToString("N"); var backup = DataJson.Clone(bundle); backup.Board.Title += " · 다른 기기 원본 보관"; SaveBundle(backup, backupId);
+            var backupId = Guid.NewGuid().ToString("N"); var backup = DataJson.Clone(bundle); backup.Board.Title += " · 다른 기기 원본 보관"; backup.Board.Archived = true; SaveBundle(backup, backupId);
             if (choice.StartsWith("다른 기기 사용"))
             {
                 foreach (var pair in local.Clock) bundle.Board.Clock[pair.Key] = Math.Max(bundle.Board.Clock.GetValueOrDefault(pair.Key), pair.Value);
-                bundle.Board.ContentHash = ""; SyncEngine.Stamp(bundle.Board, settings.DeviceId); SaveBundle(bundle, local.Id);
+                bundle.Board.Archived = local.Archived; bundle.Board.ContentHash = ""; SyncEngine.Stamp(bundle.Board, settings.DeviceId); SaveBundle(bundle, local.Id);
             }
             else if (choice.StartsWith("현재 Canvas"))
             {

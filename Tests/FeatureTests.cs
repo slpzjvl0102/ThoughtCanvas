@@ -177,6 +177,53 @@ public static class FeatureTests
             string url = Task.Run(() => NotionExporter.Export(b, "fixture", Guid.NewGuid().ToString(), CancellationToken.None, new HttpClient(handler))).GetAwaiter().GetResult();
             assert(handler.Count == 2 && url.EndsWith("test"), "Notion Batch 전송 실패");
         });
+        test("보관 Board: 통합 전·다른 기기 원본은 숨김 표시, 예전 저장본도 표시, 보관 해제 유지", () =>
+        {
+            var dir = Path.Combine(root, "archive"); var store = new BoardStore(dir);
+            var main = Sample(); store.Save(main);
+            var backup = SyncEngine.Backup(main); store.Save(backup);
+            assert(backup.Archived && !main.Archived && backup.Id != main.Id, "통합 전 보관본에 보관 표시 누락");
+            // v0.7.7 이전 저장본: Archived 값이 없는 행
+            var legacy = new Board { Title = "에픽세븐BM" + BoardStore.RemoteBackupSuffix }; var kept = new Board { Title = "보관 해제한 BM" + BoardStore.RemoteBackupSuffix };
+            store.Save(legacy); store.Save(kept);
+            using (var c = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=" + Path.Combine(dir, "boards.sqlite")))
+            {
+                c.Open(); using var cmd = c.CreateCommand(); cmd.CommandText = "UPDATE boards SET json=json_remove(json,'$.Archived') WHERE id=$id"; cmd.Parameters.AddWithValue("$id", legacy.Id); cmd.ExecuteNonQuery();
+            }
+            var reopened = new BoardStore(dir); var list = reopened.ListEntries();
+            assert(list.Single(x => x.Id == legacy.Id).Archived && reopened.Load(legacy.Id)!.Archived, "예전 보관본이 목록에 남음");
+            assert(!list.Single(x => x.Id == kept.Id).Archived, "보관 해제(Archived=false)한 Board를 다시 숨김");
+            assert(!list.Single(x => x.Id == main.Id).Archived && list.Single(x => x.Id == backup.Id).Archived, "일반 Board 숨김 또는 보관본 표시");
+            assert(SyncEngine.Digest(reopened.Load(legacy.Id)!) == SyncEngine.Digest(legacy), "보관 표시가 내용 변경(동기화 충돌)으로 처리됨");
+        });
+        test("Board 삭제: 원본·복원 지점 삭제, 수정본 보관 이동 시 기록 유지", () =>
+        {
+            var store = new BoardStore(Path.Combine(root, "delete")); var a = Sample(); store.Save(a); a.Revision = 6; store.Save(a);
+            var other = Sample(); other.Id = Guid.NewGuid().ToString("N"); store.Save(other);
+            store.Delete(a.Id);
+            assert(store.Load(a.Id) == null && store.LoadRevision(a.Id, 5) == null && store.LoadRevision(a.Id, 6) == null, "삭제 후 원본 또는 복원 지점이 남음");
+            assert(store.Load(other.Id) != null, "다른 Board까지 삭제됨");
+            string moved = Guid.NewGuid().ToString("N"); store.MoveToArchive(other.Id, moved, "수정본");
+            var m = store.Load(moved)!;
+            assert(store.Load(other.Id) == null && m.Id == moved && m.Archived && m.Title == "수정본" && store.LoadRevision(moved, other.Revision)!.Id == moved, "보관 이동 시 기록 손실");
+        });
+        test("Drive 삭제 기록: 저장본 제거·목록 제외·보관본 표시", () =>
+        {
+            var sync = Path.Combine(root, "tombstone"); Directory.CreateDirectory(sync);
+            var b = Sample(); var keep = new Board { Title = "남길 Board" }; var legacy = new Board { Title = "옛 보관" + BoardStore.MergeBackupMarker + "11-23 19:18:39" };
+            string Export(Board x) => ExportService.Export(x, Path.Combine(root, Guid.NewGuid().ToString("N")), []);
+            DriveFolderService.Publish(sync, "pc", b, Export(b), CancellationToken.None); DriveFolderService.Publish(sync, "laptop", b, Export(b), CancellationToken.None);
+            DriveFolderService.Publish(sync, "pc", keep, Export(keep), CancellationToken.None); DriveFolderService.Publish(sync, "pc", legacy, Export(legacy), CancellationToken.None);
+            assert(DriveFolderService.Discover(sync, CancellationToken.None).Entries.Single(e => e.BoardId == legacy.Id).Archived, "예전 보관본이 Drive 목록에서 일반 Board로 보임");
+            var at = DateTime.UtcNow; DriveFolderService.MarkDeleted(sync, new(b.Id, b.Title, at, "pc"));
+            var boards = Path.Combine(sync, "ThoughtCanvas", "Boards");
+            assert(!Directory.EnumerateDirectories(boards).Any(d => d.EndsWith("_" + b.Id)), "삭제한 Board 저장본이 남음");
+            // 삭제를 모르는 다른 기기가 다시 올려도 목록에 나오지 않아야 합니다.
+            DriveFolderService.Publish(sync, "laptop", b, Export(b), CancellationToken.None);
+            var catalog = DriveFolderService.Discover(sync, CancellationToken.None);
+            assert(catalog.Entries.All(e => e.BoardId != b.Id) && catalog.Entries.Any(e => e.BoardId == keep.Id), "삭제한 Board가 Drive 목록에서 되살아남");
+            assert(catalog.Deleted != null && Math.Abs((catalog.Deleted[b.Id] - at).TotalSeconds) < 1, "삭제 기록 전달 실패");
+        });
     }
     private sealed class Handler(Func<HttpRequestMessage, string, string> responder) : HttpMessageHandler
     {
