@@ -211,6 +211,7 @@ public static class SelfTests
             Assert(Folders().Length == 1 && Path.GetFileName(Folders()[0]) == "변경된 제목_" + b.Id, "이름 변경 시 폴더 분리");
             var legacy = Path.Combine(boards, "옛 제목_" + b.Id, "laptop", "v0_legacy"); Directory.CreateDirectory(legacy);
             File.Copy(laptop.Path, Path.Combine(legacy, "snapshot.zip"));
+            Directory.CreateDirectory(Path.Combine(boards, "변경된 제목_" + b.Id, "laptop", "v1_remnant", "AppData", "원본"));
             for (long r = 4; r <= 9; r++) { b.Revision = r; DriveFolderService.Publish(sync, "laptop", b, Export(), CancellationToken.None); }
             var kept = Directory.GetDirectories(Path.Combine(Folders().Single(), "laptop"));
             Assert(Folders().Length == 1 && kept.Length == DriveFolderService.KeepVersions && kept.All(d => !Path.GetFileName(d).StartsWith("v0_") && !Path.GetFileName(d).StartsWith("v2_")), "옛 폴더 합치기 또는 5개 보관 실패");

@@ -114,7 +114,16 @@ public static class DriveFolderService
         var complete = Directory.EnumerateDirectories(deviceFolder)
             .Where(d => File.Exists(Path.Combine(d, "snapshot.zip")) && !File.Exists(Path.Combine(d, "snapshot.pending")))
             .OrderByDescending(d => d == keep).ThenByDescending(d => Revision(Path.GetFileName(d))).ThenByDescending(d => Path.GetFileName(d), StringComparer.Ordinal).ToList();
-        foreach (var old in complete.Skip(count)) Tidy(() => Directory.Delete(old, true));
+        foreach (var old in complete.Skip(count)) Tidy(() => DeleteTree(old));
+        // Google Drive 폴더에서는 파일은 지워져도 빈 폴더가 늦게 지워져 남는 경우가 있습니다 (v0.7.5).
+        // 파일이 하나도 없는 이 기기의 폴더는 이전 정리에서 남은 것이므로 지웁니다. 업로드는 이 정리가 끝난 뒤에만 시작됩니다.
+        foreach (var empty in Directory.EnumerateDirectories(deviceFolder).Where(d => d != keep && !Directory.EnumerateFiles(d, "*", SearchOption.AllDirectories).Any()).ToList())
+            Tidy(() => DeleteTree(empty));
+    }
+    private static void DeleteTree(string path)
+    {
+        try { Directory.Delete(path, true); }
+        catch (IOException) { Thread.Sleep(200); if (Directory.Exists(path)) Directory.Delete(path, true); }
     }
     private static void Tidy(Action action)
     {
