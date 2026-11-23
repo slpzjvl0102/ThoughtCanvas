@@ -12,6 +12,7 @@ public partial class MainWindow : Window
     private readonly BoardStore store;
     private readonly ShellViewModel shell = new();
     private readonly Settings settings;
+    private readonly bool firstRun;
     private readonly AiService ai = new();
     private NativePenObserver? penObserver;
     private RawPenInput? rawPen;
@@ -34,7 +35,7 @@ public partial class MainWindow : Window
         Surface.PenToolSwitched += message => SetStatus(message);
         DataContext = shell;
         string root = Environment.GetEnvironmentVariable("THOUGHTCANVAS_DATA") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ThoughtCanvas");
-        store = new BoardStore(root); settings = store.LoadSettings();
+        store = new BoardStore(root); firstRun = !store.HasSettings; settings = store.LoadSettings();
         var board = store.Load(settings.LastBoardId) ?? new Board(); Surface.Load(board);
         if (!store.List().Any(x => x.Id == board.Id)) store.Save(board);
         Surface.Changed += () => { MarkChanged(true); UpdateCounts(); };
@@ -47,7 +48,7 @@ public partial class MainWindow : Window
         initialized = true; ApplyTheme(); ApplyFocus(); UpdateBoards(); UpdatePanels(); UpdateTool(); UpdateCounts();
         timer.Tick += TimerTick; timer.Start(); Closing += OnClosing;
         SetStatus("기기에 저장됨 · AI·Drive 연결은 설정에서 추가하세요.");
-        Loaded += async (_, _) => await InitializeWorkspace();
+        Loaded += async (_, _) => { if (firstRun) RunFirstSetup(); await InitializeWorkspace(); };
         SizeChanged += (_, _) => UpdateToolbarLayout(); UpdateToolbarLayout();
         InitUpdater();
     }

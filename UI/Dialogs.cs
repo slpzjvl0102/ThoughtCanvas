@@ -45,11 +45,12 @@ public static class Dialogs
         var list = new ListBox { ItemsSource = values }; string? result = null;
         var ok = Button("선택", () => { if (list.SelectedItem is string value) { result = value; window.DialogResult = true; } }); DockPanel.SetDock(ok, Dock.Bottom); dock.Children.Add(ok); dock.Children.Add(list); window.ShowDialog(); return result;
     }
-    public static bool Settings(Window owner, Settings settings)
+    public static bool Settings(Window owner, Settings settings, bool firstRun = false)
     {
-        var window = Window(owner, "연결 및 자동 실행 설정", 650, 720); var dock = new DockPanel { Margin = new Thickness(24) }; window.Content = dock;
+        var window = Window(owner, firstRun ? "ThoughtCanvas 처음 설정" : "연결 및 자동 실행 설정", 650, 720); var dock = new DockPanel { Margin = new Thickness(24) }; window.Content = dock;
         var stack = new StackPanel(); var scroll = new ScrollViewer { Content = stack, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         void Label(string text) => stack.Children.Add(new TextBlock { Text = text, Margin = new Thickness(0, 12, 0, 5), TextWrapping = TextWrapping.Wrap });
+        if (firstRun) Label("환영합니다. 이 기기에서 처음 실행하여 기본 설정을 확인합니다. 모든 항목은 나중에 작업 → 연결 설정에서 바꿀 수 있고, AI·Drive·Notion은 비워 두어도 필기와 Local 저장은 바로 사용할 수 있습니다.");
         Label("기기 이름"); var device = new TextBox { Text = settings.DeviceName, Padding = new Thickness(8) }; stack.Children.Add(device);
         Label($"현재 Key 출처: {GeminiCredentials.Resolve(settings).Source} · Key 값은 표시하지 않습니다.");
         Label("환경 변수 우선: GEMINI_API_KEY → GOOGLE_API_KEY → 앱에 저장한 Key. 각 변수는 User → Machine → Process 순서로 확인합니다. 환경 변수를 사용하면 아래 Key는 비워두셔도 됩니다.");
@@ -60,7 +61,7 @@ public static class Dialogs
         var autoAi = new CheckBox { Content = "자동 AI 문서화 사용 (Google API 한도·Credits 사용)", IsChecked = settings.AutomaticAi, Margin = new Thickness(0, 8, 0, 8) }; stack.Children.Add(autoAi);
         Label("Google AI Studio에서 발급한 API key를 입력하세요. Google AI Pro 구독만으로 API가 무제한 제공되지는 않습니다. 무료 한도·Cloud credits 적용은 Google Billing 설정에 따릅니다. Drive 폴더 저장에는 API Key가 필요 없습니다.");
         Label("AI 실행 간 저장 횟수 (기본 20)"); var count = new TextBox { Text = settings.AiEverySaves.ToString(), Padding = new Thickness(8) }; stack.Children.Add(count);
-        Label("Google Drive 동기화 폴더 (이 안에 ThoughtCanvas 폴더를 만듭니다)");
+        Label("Google Drive 동기화 폴더 (이 안에 ThoughtCanvas 폴더를 만듭니다 · 쓰지 않으면 비워 두세요)");
         var folder = new TextBox { Text = settings.DriveSyncFolder, Padding = new Thickness(8) }; stack.Children.Add(folder);
         stack.Children.Add(Button("폴더 선택", () => { var picker = new Microsoft.Win32.OpenFolderDialog(); if (picker.ShowDialog(window) == true) folder.Text = picker.FolderName; }));
         var autoDrive = new CheckBox { Content = "변경된 현재 Board를 60초 간격으로 Drive 폴더에 저장", IsChecked = settings.AutomaticFolderBackup, Margin = new Thickness(0, 15, 0, 8) }; stack.Children.Add(autoDrive);
@@ -74,7 +75,7 @@ public static class Dialogs
         {
             if (!ThoughtCanvas.Settings.IsSupportedModel(model.Text.Trim())) { Message(window, "Model 확인", "gemini-3.8-flash와 같은 Gemini 3 계열 Model ID를 입력하세요."); return; }
             if (!int.TryParse(count.Text, out int n) || n < 1 || n > 1000) { Message(window, "입력 확인", "저장 횟수는 1~1000 사이로 입력하세요."); return; }
-            if (!Path.IsPathFullyQualified(folder.Text.Trim())) { Message(window, "폴더 확인", "Drive 폴더의 전체 경로를 입력하세요."); return; }
+            if (folder.Text.Trim().Length > 0 && !Path.IsPathFullyQualified(folder.Text.Trim())) { Message(window, "폴더 확인", "Drive 폴더의 전체 경로를 입력하거나 비워 두세요."); return; }
             settings.Model = model.Text.Trim();
             if (!string.IsNullOrWhiteSpace(notionParent.Text) && !Guid.TryParse(notionParent.Text.Trim(), out _)) { Message(window, "Page ID 확인", "Notion Page ID를 입력하세요 (URL의 32자리 ID)."); return; }
             settings.ProtectedNotionToken = Secrets.Protect(notionToken.Password.Trim()); settings.NotionParentId = notionParent.Text.Trim();
