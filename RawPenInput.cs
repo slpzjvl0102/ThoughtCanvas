@@ -13,16 +13,39 @@ public sealed class RawPenInput : IDisposable
     private int messages, reports, presses, penMouse;
     private int matched, parsed, parseErrors;
     private readonly HashSet<byte> reportIds = [];
-    private readonly HashSet<string> observed = [];
+    // 진단용 ON Usage: (Page << 16 | Usage). 문자열은 Summary를 열 때만 만듭니다.
+    private readonly HashSet<uint> observed = [];
     private string lastError = "없음";
     private readonly Queue<string> transitions = new();
-    private string lastState = "";
+    private int lastState = -1;
     private string status;
+    // 매 Report마다 새로 할당하지 않도록 재사용하는 버퍼 (UI thread 전용)
+    private nint rawBuffer; private uint rawCapacity;
+    private byte[] rawBytes = [];
+    private byte[] report = [];
+    private readonly ushort[] usages = new ushort[1024];
     public string Summary => $"HID Raw Input v0.5.5: {status}, 장치 {devices.Values.Count(d => d != null)}/{devices.Count}, WM_INPUT {messages}, Report {reports}, Down {presses}, Pen 우클릭 {penMouse}\n" +
         $"Report ID: {string.Join(", ", reportIds.Order().Select(x => x.ToString("X2")))}\nID 일치 {matched}, 해석 성공 {parsed}, 실패 {parseErrors}, 최근 오류 {lastError}\n" +
-        $"감지된 ON Usage: {string.Join(", ", observed.Order())}\n최근 상태 변화 (B=Barrel, I=Invert, E=Eraser):\n{string.Join("\n", transitions)}\n" +
+        $"감지된 ON Usage: {string.Join(", ", observed.Order().Select(x => $"{x >> 16:X4}:{x & 0xFFFF:X4}"))}\n최근 상태 변화 (B=Barrel, I=Invert, E=Eraser):\n{string.Join("\n", transitions)}\n" +
         string.Join("\n", devices.Values.Where(d => d != null).SelectMany(d => d!.Buttons).Take(64).Select(c => $"Cap: ID={c.ReportId:X2} Page={c.Page:X4} Link={c.LinkCollection} Usage={c.UsageMin:X4}~{(c.IsRange != 0 ? c.UsageMax : c.UsageMin):X4}"));
-    private sealed record Device(nint Data, ButtonCap[] Buttons);
+    // Report ID별로 해석할 Collection 목록. 장치의 Button Caps는 바뀌지 않으므로 처음 한 번만 계산합니다.
+    private readonly record struct Collection(ushort Page, ushort Link, bool HasToolSwitch);
+    private sealed class Device(nint data, ButtonCap[] buttons)
+    {
+        public nint Data { get; } = data;
+        public ButtonCap[] Buttons { get; } = buttons;
+        private readonly Dictionary<byte, Collection[]> byReport = [];
+        public Collection[] For(byte reportId)
+        {
+            if (byReport.TryGetValue(reportId, out var cached)) return cached;
+            var caps = Buttons.Where(c => c.ReportId == reportId).ToArray();
+            // Only a successfully decoded tool-switch collection may release the gate.
+            var result = caps.DistinctBy(c => (c.Page, c.LinkCollection)).Select(cap => new Collection(cap.Page, cap.LinkCollection,
+                caps.Any(c => c.Page == cap.Page && c.LinkCollection == cap.LinkCollection &&
+                    (ContainsUsage(c, 0x44) || ContainsUsage(c, 0x5A) || ContainsUsage(c, 0x3C) || ContainsUsage(c, 0x45)) && c.Page == 13))).ToArray();
+            byReport[reportId] = result; return result;
+        }
+    }
     public RawPenInput(Window window, Action<Point, bool, bool> sample)
     {
         this.window = window; this.sample = sample;
@@ -62,10 +85,14 @@ public sealed class RawPenInput : IDisposable
         }
         return 0;
     }
+    private static void ValidateReports(int dataLength, int offset, uint size, uint count)
+    {
+        if (size == 0 || count > 4096 || offset < 0 || offset > dataLength || (ulong)size * count > (ulong)(dataLength - offset))
+            throw new InvalidDataException("HID Report 길이 오류");
+    }
     public static List<byte[]> SplitReports(byte[] data, int offset, uint size, uint count)
     {
-        if (size == 0 || count > 4096 || offset < 0 || offset > data.Length || (ulong)size * count > (ulong)(data.Length - offset))
-            throw new InvalidDataException("HID Report 길이 오류");
+        ValidateReports(data.Length, offset, size, count);
         var result = new List<byte[]>();
         for (uint i = 0; i < count; i++) result.Add(data.AsSpan(checked(offset + (int)(i * size)), checked((int)size)).ToArray());
         return result;
@@ -74,65 +101,72 @@ public sealed class RawPenInput : IDisposable
     {
         uint headerSize = (uint)Marshal.SizeOf<RawHeader>(), size = 0;
         if (GetRawInputData(handle, 0x10000003, 0, ref size, headerSize) == uint.MaxValue || size < headerSize + 8 || size > 1_048_576) return;
-        nint buffer = Marshal.AllocHGlobal((int)size);
-        try
+        if (rawCapacity < size)
         {
-            uint read = GetRawInputData(handle, 0x10000003, buffer, ref size, headerSize);
-            if (read == uint.MaxValue || read < headerSize + 8) return;
-            var header = Marshal.PtrToStructure<RawHeader>(buffer); if (header.Type != 2) return;
-            if (!devices.TryGetValue(header.Device, out var device))
+            if (rawBuffer != 0) Marshal.FreeHGlobal(rawBuffer);
+            rawBuffer = 0; rawCapacity = 0;
+            rawBuffer = Marshal.AllocHGlobal((int)size); rawCapacity = size;
+        }
+        uint read = GetRawInputData(handle, 0x10000003, rawBuffer, ref size, headerSize);
+        if (read == uint.MaxValue || read < headerSize + 8) return;
+        var header = Marshal.PtrToStructure<RawHeader>(rawBuffer); if (header.Type != 2) return;
+        if (!devices.TryGetValue(header.Device, out var device))
+        {
+            if (devices.Count >= 32) return;
+            device = LoadDevice(header.Device); devices[header.Device] = device;
+        }
+        if (device == null) return;
+        if (rawBytes.Length < read) rawBytes = new byte[Math.Max(read, 256)];
+        Marshal.Copy(rawBuffer, rawBytes, 0, (int)read);
+        uint reportSize = BitConverter.ToUInt32(rawBytes, (int)headerSize), count = BitConverter.ToUInt32(rawBytes, (int)headerSize + 4);
+        int start = (int)headerSize + 8;
+        ValidateReports((int)read, start, reportSize, count);
+        // HidP_GetUsages는 Report 길이와 같은 배열을 받으므로, 같은 크기의 배열 하나를 재사용합니다.
+        if (report.Length != reportSize) report = new byte[reportSize];
+        for (uint index = 0; index < count; index++)
+        {
+            Buffer.BlockCopy(rawBytes, checked(start + (int)(index * reportSize)), report, 0, (int)reportSize);
+            reports++;
+            reportIds.Add(report[0]);
+            var collections = device.For(report[0]);
+            if (collections.Length == 0) continue;
+            matched++;
+            bool known = false, pressed = false;
+            bool barrel = false, inverted = false, eraser = false;
+            foreach (var cap in collections)
             {
-                if (devices.Count >= 32) return;
-                device = LoadDevice(header.Device); devices[header.Device] = device;
+                uint length = (uint)usages.Length;
+                int result = HidP_GetUsages(0, cap.Page, cap.Link, usages, ref length, device.Data, report, (uint)report.Length);
+                if (result != 0x00110000) { parseErrors++; lastError = $"0x{result:X8} (ID={report[0]:X2}, Page={cap.Page:X4}, Link={cap.Link})"; continue; }
+                parsed++;
+                known |= cap.HasToolSwitch;
+                int used = (int)Math.Min(length, (uint)usages.Length);
+                for (int i = 0; i < used; i++)
+                {
+                    ushort usage = usages[i];
+                    if (observed.Count < 128) observed.Add((uint)cap.Page << 16 | usage);
+                    if (cap.HasToolSwitch)
+                    {
+                        pressed |= IsToolSwitchUsage(cap.Page, usage);
+                        barrel |= IsBarrelUsage(cap.Page, usage);
+                        inverted |= cap.Page == 13 && usage == 0x3C;
+                        eraser |= cap.Page == 13 && usage == 0x45;
+                    }
+                }
             }
-            if (device == null) return;
-            var bytes = new byte[read]; Marshal.Copy(buffer, bytes, 0, bytes.Length);
-            uint reportSize = BitConverter.ToUInt32(bytes, (int)headerSize), count = BitConverter.ToUInt32(bytes, (int)headerSize + 4);
-            foreach (var report in SplitReports(bytes, (int)headerSize + 8, reportSize, count))
+            if (known)
             {
-                reports++;
-                reportIds.Add(report[0]);
-                var caps = device.Buttons.Where(c => c.ReportId == report[0]).ToArray();
-                if (caps.Length == 0) continue;
-                matched++;
-                bool known = false, pressed = false;
-                bool barrel = false, inverted = false, eraser = false;
-                foreach (var cap in caps.DistinctBy(c => (c.Page, c.LinkCollection)))
+                int state = (barrel ? 1 : 0) | (inverted ? 2 : 0) | (eraser ? 4 : 0);
+                if (state != lastState)
                 {
-                    var usages = new ushort[1024]; uint length = (uint)usages.Length;
-                    int result = HidP_GetUsages(0, cap.Page, cap.LinkCollection, usages, ref length, device.Data, report, (uint)report.Length);
-                    if (result != 0x00110000) { parseErrors++; lastError = $"0x{result:X8} (ID={report[0]:X2}, Page={cap.Page:X4}, Link={cap.LinkCollection})"; continue; }
-                    parsed++;
-                    // Only a successfully decoded tool-switch collection may release the gate.
-                    bool hasBarrel = caps.Any(c => c.Page == cap.Page && c.LinkCollection == cap.LinkCollection &&
-                        (ContainsUsage(c, 0x44) || ContainsUsage(c, 0x5A) || ContainsUsage(c, 0x3C) || ContainsUsage(c, 0x45)) && c.Page == 13);
-                    known |= hasBarrel;
-                    foreach (var usage in usages.Take((int)Math.Min(length, (uint)usages.Length)))
-                    {
-                        if (observed.Count < 128) observed.Add($"{cap.Page:X4}:{usage:X4}");
-                        if (hasBarrel)
-                        {
-                            pressed |= IsToolSwitchUsage(cap.Page, usage);
-                            barrel |= IsBarrelUsage(cap.Page, usage);
-                            inverted |= cap.Page == 13 && usage == 0x3C;
-                            eraser |= cap.Page == 13 && usage == 0x45;
-                        }
-                    }
+                    lastState = state;
+                    if (transitions.Count >= 24) transitions.Dequeue();
+                    transitions.Enqueue($"{DateTime.Now:HH:mm:ss.fff} B={(barrel ? 1 : 0)} I={(inverted ? 1 : 0)} E={(eraser ? 1 : 0)}");
                 }
-                if (known)
-                {
-                    string state = $"B={(barrel ? 1 : 0)} I={(inverted ? 1 : 0)} E={(eraser ? 1 : 0)}";
-                    if (state != lastState)
-                    {
-                        lastState = state;
-                        if (transitions.Count >= 24) transitions.Dequeue();
-                        transitions.Enqueue($"{DateTime.Now:HH:mm:ss.fff} {state}");
-                    }
-                    if (GetCursorPos(out var point)) { if (pressed) presses++; sample(new(point.X, point.Y), pressed, true); }
-                }
+                // Button 판정 Gate가 Raw 경로를 우선 경로로 유지하도록 매 Report마다 전달합니다 (호출 빈도 유지).
+                if (GetCursorPos(out var point)) { if (pressed) presses++; sample(new(point.X, point.Y), pressed, true); }
             }
         }
-        finally { Marshal.FreeHGlobal(buffer); }
     }
     private static Device? LoadDevice(nint handle)
     {
@@ -156,6 +190,7 @@ public sealed class RawPenInput : IDisposable
         source.RemoveHook(Hook);
         foreach (var device in devices.Values) if (device != null) Marshal.FreeHGlobal(device.Data);
         devices.Clear();
+        if (rawBuffer != 0) { Marshal.FreeHGlobal(rawBuffer); rawBuffer = 0; rawCapacity = 0; }
         RegisterRawInputDevices([new() { Page = 13, Usage = 2, Flags = 1 }, new() { Page = 13, Usage = 1, Flags = 1 }], 2, (uint)Marshal.SizeOf<Registration>());
     }
     [StructLayout(LayoutKind.Sequential)] private struct Registration { public ushort Page, Usage; public uint Flags; public nint Target; }
