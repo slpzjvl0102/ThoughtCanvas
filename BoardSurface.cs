@@ -576,9 +576,16 @@ public class BoardSurface : Canvas
         foreach (var i in Board.Ink.Where(i => Selection.Contains(i.Id))) b.Union(strokes[i.Id].GetBounds());
         foreach (var t in Board.Texts.Where(t => Selection.Contains(t.Id))) b.Union(TextBounds(t));
         if (b.IsEmpty) return; History.Push(CanvasHistory.Capture(Board));
-        foreach (var i in Board.Ink.Where(i => Selection.Contains(i.Id))) { i.Points = i.Points.Select(p => new Sample(b.X + (p.X - b.X) * scale, b.Y + (p.Y - b.Y) * scale, p.Pressure)).ToList(); i.Width *= scale; }
-        foreach (var t in Board.Texts.Where(t => Selection.Contains(t.Id))) { t.X = b.X + (t.X - b.X) * scale; t.Y = b.Y + (t.Y - b.Y) * scale; t.Width *= scale; t.FontSize *= scale; }
-        Rebuild(); Changed?.Invoke();
+        // 선택 영역의 중심을 기준으로 확대·축소합니다 (v0.6.5, 이전: 좌상단 기준).
+        double cx = b.X + b.Width / 2, cy = b.Y + b.Height / 2;
+        foreach (var i in Board.Ink.Where(i => Selection.Contains(i.Id)))
+        {
+            i.Points = i.Points.Select(p => new Sample(cx + (p.X - cx) * scale, cy + (p.Y - cy) * scale, p.Pressure)).ToList(); i.Width *= scale;
+            // 선택된 Stroke만 다시 만듭니다 (이전: 전체 Rebuild).
+            if (i.Points.Count > 0) { var stroke = i.ToStroke(); strokes[i.Id] = stroke; RenderInk(i.Id, stroke); }
+        }
+        foreach (var t in Board.Texts.Where(t => Selection.Contains(t.Id))) { t.X = cx + (t.X - cx) * scale; t.Y = cy + (t.Y - cy) * scale; t.Width *= scale; t.FontSize *= scale; }
+        Redraw(); Changed?.Invoke();
     }
 
     // 완성된 Stroke 하나당 DrawingVisual 하나. 순서는 Board.Ink 순서(나중 Stroke가 위)를 따릅니다.
