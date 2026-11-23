@@ -333,6 +333,8 @@ public static class SelfTests
         FeatureTests.Run(root, Test, Assert);
         OptimizationTests.Run(root, Test, Assert);
         File.WriteAllText(report, $"ThoughtCanvas 자동 검증 · {DateTime.Now:O}\n{results.Count - failed}/{results.Count} 통과\n\n" + string.Join("\n\n", results));
+        // 검증용 임시 데이터는 결과를 쓴 뒤 지웁니다 (v0.7.0, 이전: 실행할 때마다 test-data에 누적).
+        try { Directory.Delete(root, true); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         return failed == 0 ? 0 : 1;
     }
     private static string WrapResponse(AnalysisResult result, string? raw = null, bool includeThought = false)

@@ -142,6 +142,28 @@ public partial class MainWindow : Window
         finally { catalogBusy = false; }
     }
     private async void RefreshBoardsClick(object sender, RoutedEventArgs e) => await RefreshDriveBoards();
+    // 자동 검증 (v0.7.0): 같은 실행 파일을 --self-test로 따로 실행합니다. 작업 중인 Board와 데이터는 건드리지 않습니다.
+    private async void SelfTestClick(object sender, RoutedEventArgs e)
+    {
+        SelfTestButton.IsEnabled = false;
+        try
+        {
+            SaveNow(); SetStatus("자동 검증 실행 중 · 1분 정도 걸릴 수 있습니다");
+            string report = Path.Combine(Path.GetTempPath(), "ThoughtCanvas", "self-test.txt");
+            Directory.CreateDirectory(Path.GetDirectoryName(report)!); if (File.Exists(report)) File.Delete(report);
+            var start = new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = false }; start.ArgumentList.Add("--self-test"); start.ArgumentList.Add(report);
+            using (var process = Process.Start(start)!) await process.WaitForExitAsync();
+            if (!File.Exists(report)) throw new IOException("자동 검증 결과 파일이 만들어지지 않았습니다.");
+            var lines = File.ReadAllText(report).Split("\n\n");
+            var failed = lines.Skip(1).Where(x => x.StartsWith("FAIL")).ToList();
+            string summary = lines[0].Split('\n').Last();
+            SetStatus("자동 검증 " + summary);
+            Dialogs.DiagnosticMessage(this, "자동 검증 · " + summary,
+                (failed.Count == 0 ? "모든 항목 통과" : "실패 항목\n\n" + string.Join("\n\n", failed)) + "\n\n전체 결과 파일: " + report);
+        }
+        catch (Exception ex) { SetStatus("자동 검증 실패"); Error(ex); }
+        finally { SelfTestButton.IsEnabled = true; }
+    }
     private void UpdateBoards()
     {
         // 이 기기에 있는 Board는 한 줄만 보입니다 (v0.6.9). 다른 기기에 확인하지 않은 변경이 있으면 그 줄에 표시합니다.
@@ -401,7 +423,7 @@ public partial class MainWindow : Window
         catch (OperationCanceledException) { SetStatus("Drive 폴더 작업이 취소되었습니다."); } catch (Exception ex) { Error(ex); }
     }
     private async void SettingsClick(object sender, RoutedEventArgs e) { try { if (Dialogs.Settings(this, settings)) { uploaded.Clear(); store.SaveSettings(settings); SetStatus("설정을 저장했습니다."); lastConnectivity = DateTime.MinValue; await RefreshDriveBoards(); } } catch (Exception ex) { Error(ex); } }
-    private void HelpClick(object sender, RoutedEventArgs e) => Dialogs.DiagnosticMessage(this, "Prototype 사용 안내 · v0.6.9", "Pen: 필기 / S Pen Button: Pen → Eraser → Lasso\n한 손가락: 이동 / 두 손가락: 이동·확대 / 회전 없음\nMouse: 좌클릭 현재 Tool / 우클릭 이동 / Wheel Zoom\n휠클릭을 누른 채 방향으로 Drag하고 놓으면 Tool 선택\nText Tool: Click하여 생성, 기존 Text Click하여 수정\nLasso: 완전히 포함한 요소 선택, 선택 위 Drag로 이동\nShift+Click: Lasso에서 추가·해제 / Delete: 선택 삭제\nCtrl+Z / Ctrl+Y: 50회 Undo·Redo\n\nAI는 Gemini API key, Drive는 동기화 폴더 경로를 사용합니다. OAuth는 필요 없습니다.\n찾기: 모든 Board·Drive Keyword 검색 및 AI 관련 검색.\nDrive 목록에서 같은 Board를 이어 열 수 있습니다. 작업 → 다른 기기 변경 확인에서 유지·교체·빈 공간 통합을 선택합니다.\n작업 → 공동 편집: 같은 Network의 PC·노트북 연결. Export: PDF·HTML·Markdown·원본. 모바일은 이번 범위에서 제외되었습니다.\n\n" + Surface.PenInputSummary + "\n" + (rawPen?.Summary ?? "HID 초기화 전"));
+    private void HelpClick(object sender, RoutedEventArgs e) => Dialogs.DiagnosticMessage(this, "Prototype 사용 안내 · v0.7.0", "Pen: 필기 / S Pen Button: Pen → Eraser → Lasso\n한 손가락: 이동 / 두 손가락: 이동·확대 / 회전 없음\nMouse: 좌클릭 현재 Tool / 우클릭 이동 / Wheel Zoom\n휠클릭을 누른 채 방향으로 Drag하고 놓으면 Tool 선택\nText Tool: Click하여 생성, 기존 Text Click하여 수정\nLasso: 완전히 포함한 요소 선택, 선택 위 Drag로 이동\nShift+Click: Lasso에서 추가·해제 / Delete: 선택 삭제\nCtrl+Z / Ctrl+Y: 50회 Undo·Redo\n\nAI는 Gemini API key, Drive는 동기화 폴더 경로를 사용합니다. OAuth는 필요 없습니다.\n찾기: 모든 Board·Drive Keyword 검색 및 AI 관련 검색.\nDrive 목록에서 같은 Board를 이어 열 수 있습니다. 작업 → 다른 기기 변경 확인에서 유지·교체·빈 공간 통합을 선택합니다.\n작업 → 공동 편집: 같은 Network의 PC·노트북 연결. Export: PDF·HTML·Markdown·원본. 모바일은 이번 범위에서 제외되었습니다.\n\n" + Surface.PenInputSummary + "\n" + (rawPen?.Summary ?? "HID 초기화 전"));
     private void OpenRadial(Point p) { radialOrigin = p; radialChoice = null; DrawRadial(); }
     private void MoveRadial(Point p)
     {

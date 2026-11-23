@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
-    <Version>0.6.9</Version>
+    <Version>0.7.0</Version>
     <!-- WPF 메시지 리소스는 한국어만 포함 (다른 언어는 영문 기본값) -->
     <SatelliteResourceLanguages>ko</SatelliteResourceLanguages>
   </PropertyGroup>
