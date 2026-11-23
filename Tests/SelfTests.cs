@@ -153,6 +153,22 @@ public static class SelfTests
             catch (InvalidOperationException ex) { rejected = ex.Message.Contains("429"); }
             Assert(rejected, "모든 Model 소진 시 오류를 알리지 않음");
         });
+        Test("Gemini 429 시 성능 높은 순 자동 전환", () =>
+        {
+            GeminiModels.ResetCache();
+            var ordered = GeminiModels.ByPerformance(["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3-pro-preview", "gemini-3.5-pro", "gemini-3.8-flash-image", "gemini-3.8-flash-preview", "text-embedding-004", "gemini-2.5-pro"]);
+            Assert(ordered.SequenceEqual(["gemini-3.5-pro", "gemini-3-pro-preview", "gemini-3.8-flash", "gemini-3.8-flash-preview", "gemini-3.5-flash-lite"]), "성능 순서 오류: " + string.Join(", ", ordered));
+            var b = new Board { Ink = [Line()] }; var regions = ExportService.RenderRegions(b);
+            var handler = new FixtureHandler(b.Ink[0].Id) { ExhaustedModel = "gemini-3.8-flash", Models = ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-3.5-pro", "gemini-3.8-flash-image"] };
+            var service = new AiService(new System.Net.Http.HttpClient(handler));
+            Task.Run(() => service.Analyze(b, regions, "fixture-key", "gemini-3.8-flash", CancellationToken.None, autoSwitch: true)).GetAwaiter().GetResult();
+            Assert(service.LastModel == "gemini-3.5-pro", "Pro Model로 먼저 전환하지 않음: " + service.LastModel);
+            handler.ExhaustedModel = "gemini-3.8-flash"; bool rejected = false;
+            try { Task.Run(() => service.Analyze(b, regions, "fixture-key", "gemini-3.8-flash", CancellationToken.None)).GetAwaiter().GetResult(); }
+            catch (InvalidOperationException ex) { rejected = ex.Message.Contains("429"); }
+            Assert(rejected, "자동 전환을 끄면 429를 그대로 안내해야 함");
+            GeminiModels.ResetCache();
+        });
         Test("기존 설정 전환: OpenAI Key 격리·자동 AI 중지·Drive 설정 보존", () =>
         {
             var store = new BoardStore(Path.Combine(root, "migration"));
@@ -367,8 +383,11 @@ public static class SelfTests
         public bool HasAuthorization { get; private set; }
         public System.Net.HttpStatusCode Status { get; set; } = System.Net.HttpStatusCode.OK;
         public string? ExhaustedModel { get; set; }
+        public string[] Models { get; set; } = [];
         protected override async Task<System.Net.Http.HttpResponseMessage> SendAsync(System.Net.Http.HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            if (request.Method == System.Net.Http.HttpMethod.Get)
+                return new(System.Net.HttpStatusCode.OK) { Content = new System.Net.Http.StringContent(JsonSerializer.Serialize(new { models = Models.Select(m => new { name = "models/" + m, supportedGenerationMethods = new[] { "generateContent" } }) })) };
             RequestBody = await request.Content!.ReadAsStringAsync(cancellationToken);
             Url = request.RequestUri!.ToString(); Key = request.Headers.GetValues("x-goog-api-key").Single(); HasAuthorization = request.Headers.Authorization != null;
             var result = new AnalysisResult { Document = "Draw 분석", Ideas = [new() { Id = "i1", Content = "Draw", SourceIds = [id] }] };

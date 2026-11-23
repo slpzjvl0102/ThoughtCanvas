@@ -66,7 +66,7 @@ public partial class MainWindow
         {
             relatedBusy = true; SetStatus("모든 검색 대상에서 관련 아이디어를 확인하고 있습니다.");
             var candidates = LibrarySearch.Keyword(SearchCandidates(), "", topic, category);
-            var found = await LibrarySearch.Related(candidates, query, GeminiCredentials.Resolve(settings).Key, settings.Model, lifetime.Token);
+            var found = await LibrarySearch.Related(candidates, query, GeminiCredentials.Resolve(settings).Key, settings.Model, lifetime.Token, autoSwitch: settings.AutoSwitchModel);
             if (SearchBox.Text.Trim() != query || all != (SearchAll.IsChecked == true) || boardId != Surface.Board.Id || topic != (TopicFilter.SelectedIndex <= 0 ? null : TopicFilter.SelectedItem?.ToString()) || category != (CategoryFilter.SelectedIndex <= 0 ? null : CategoryFilter.SelectedItem?.ToString())) { SetStatus("검색 조건이 바뀌어 이전 AI 검색 결과를 표시하지 않았습니다."); return; }
             var exact = LibrarySearch.Keyword(candidates, query, topic, category);
             SearchResults.ItemsSource = exact.Concat(found.Where(f => !exact.Any(e => e.Item == f.Item && e.Idea == f.Idea))).ToList();

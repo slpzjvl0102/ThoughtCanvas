@@ -29,7 +29,7 @@ public class AiService
             ["Question"] = Str(), ["SourceIds"] = Strings()
         }) }
     });
-    public async Task<AnalysisResult> Analyze(Board snapshot, List<RegionData> regions, string key, string model, CancellationToken token, bool full = false)
+    public async Task<AnalysisResult> Analyze(Board snapshot, List<RegionData> regions, string key, string model, CancellationToken token, bool full = false, bool autoSwitch = false)
     {
         if (regions.Count == 0) throw new InvalidOperationException("정리할 필기나 Text가 없습니다.");
         if (regions.Count > 24) throw new InvalidOperationException("현재 AI Prototype은 24개 구역까지 한 번에 분석합니다. 자동으로 내용을 누락하지 않고 작업을 중단했습니다.");
@@ -71,7 +71,7 @@ public class AiService
                 responseMimeType = "application/json", responseJsonSchema = Schema()
             }
         };
-        var (sent, usedModel) = await GeminiModels.Send(client, model, key, JsonSerializer.Serialize(body), token);
+        var (sent, usedModel) = await GeminiModels.Send(client, model, key, JsonSerializer.Serialize(body), token, autoSwitch);
         using var response = sent; LastModel = usedModel;
         var payload = await response.Content.ReadAsStringAsync(token);
         if (!response.IsSuccessStatusCode)
@@ -85,7 +85,7 @@ public class AiService
                 401 or 403 => "API key와 해당 Google 프로젝트의 Gemini API 권한을 확인하세요.",
                 402 => "Google AI Studio의 Billing·Credits 잔액을 확인하세요.",
                 404 => "이 프로젝트에서 사용할 수 있는 Model인지 확인하세요.",
-                429 => GeminiModels.Chain(model).Count > 1 ? "설정한 모든 Model의 요청 한도 또는 Quota를 초과했습니다. AI Studio에서 한도를 확인한 후 다시 실행하세요." : "요청 한도 또는 Quota를 초과했습니다. 설정의 Model ID에 쉼표로 대체 Model을 추가하거나 AI Studio에서 한도를 확인하세요.",
+                429 => GeminiModels.Chain(model).Count > 1 || autoSwitch ? "전환 가능한 Model의 요청 한도 또는 Quota를 초과했습니다. AI Studio에서 한도를 확인한 후 다시 실행하세요." : "요청 한도 또는 Quota를 초과했습니다. 설정에서 사용량 한도 시 자동 전환을 켜거나 AI Studio에서 한도를 확인하세요.",
                 >= 500 => "Google 서비스가 일시적으로 응답하지 않습니다. 잠시 후 다시 실행하세요.",
                 _ => "연결 설정을 확인하세요."
             };

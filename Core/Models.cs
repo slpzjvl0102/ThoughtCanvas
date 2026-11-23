@@ -155,6 +155,7 @@ public class Settings
     public const string DefaultModel = "gemini-3.8-flash";
     public string ProtectedGeminiApiKey { get; set; } = "";
     public string Model { get; set; } = DefaultModel;
+    public bool AutoSwitchModel { get; set; } = true; // 429 시 성능 높은 순으로 다른 Model 사용
     // 쉼표로 이어 쓴 대체 Model 목록도 허용합니다 (각 항목이 Gemini 3 계열이어야 함).
     public static bool IsSupportedModel(string model) => GeminiModels.Chain(model) is { Count: > 0 } chain && chain.All(IsSingleModel);
     public static bool IsSingleModel(string model) => System.Text.RegularExpressions.Regex.IsMatch(model, @"^gemini-3[.a-zA-Z0-9-]*$");
