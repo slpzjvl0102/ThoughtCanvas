@@ -32,10 +32,8 @@ public partial class MainWindow
 
     private async Task CheckForUpdate(bool manual)
     {
-        string token;
-        try { token = Secrets.Unprotect(settings.ProtectedGitHubToken); } catch { token = ""; }
         if (manual) SetStatus("업데이트 확인 중…");
-        var result = await updater.CheckAndDownloadAsync(token, lifetime.Token);
+        var result = await updater.CheckAndDownloadAsync(lifetime.Token);
         RefreshUpdateMenu();
         switch (result)
         {
@@ -47,9 +45,6 @@ public partial class MainWindow
                 break;
             case UpdateCheckResult.NotInstalled when manual:
                 Dialogs.Message(this, "업데이트", "설치 버전(ThoughtCanvasApp-win-Setup.exe)에서만 자동 업데이트를 쓸 수 있습니다.");
-                break;
-            case UpdateCheckResult.NoToken when manual:
-                Dialogs.Message(this, "업데이트", "작업 → 연결 설정에서 업데이트용 GitHub token을 입력하세요.");
                 break;
             case UpdateCheckResult.Failed:
                 SetStatus("업데이트 확인 실패 · " + updater.LastError);

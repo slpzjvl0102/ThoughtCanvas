@@ -4,8 +4,7 @@ ThoughtCanvas — Windows Prototype 0.7.6
 시작 (0.7.6부터 설치형 · 자동 업데이트)
 1. GitHub Release에서 ThoughtCanvasApp-win-Setup.exe를 받아 한 번 설치합니다. 이전 ZIP 버전은 닫고 폴더를 지워도 됩니다.
    코드 서명이 없어 처음 설치할 때 SmartScreen 경고가 나옵니다 (추가 정보 → 실행).
-2. 작업 → 연결 설정에서 기기 이름, Google Drive 폴더 경로, 자동 업데이트용 GitHub token을 설정합니다.
-   GitHub token: github.com → Settings → Developer settings → Fine-grained tokens → Repository access는 ThoughtCanvas만, Permissions는 Contents: Read-only.
+2. 작업 → 연결 설정에서 기기 이름과 각 기기의 Google Drive 폴더 경로를 설정합니다.
 3. 앱이 시작 1분 뒤와 6시간마다 새 버전을 확인해 받아 둡니다. 작업 → 재시작하여 업데이트를 누르거나, 다음 실행 때 자동 적용됩니다.
 4. 설치 위치는 %LOCALAPPDATA%\ThoughtCanvasApp, Local 데이터는 %LOCALAPPDATA%\ThoughtCanvas로 서로 분리되어 업데이트·재설치 후에도 유지됩니다.
 

@@ -69,8 +69,6 @@ public static class Dialogs
         var notionToken = new PasswordBox { Password = Secrets.Unprotect(settings.ProtectedNotionToken), Padding = new Thickness(8) }; stack.Children.Add(notionToken);
         Label("Notion 상위 Page ID · 해당 Page에 Connection 권한을 부여하세요.");
         var notionParent = new TextBox { Text = settings.NotionParentId, Padding = new Thickness(8) }; stack.Children.Add(notionParent);
-        Label("자동 업데이트 · GitHub token (ThoughtCanvas 저장소 Contents 읽기 전용 fine-grained token) · 이 기기에 암호화하여 저장");
-        var githubToken = new PasswordBox { Password = Secrets.Unprotect(settings.ProtectedGitHubToken), Padding = new Thickness(8) }; stack.Children.Add(githubToken);
         bool saved = false;
         var save = Button("설정 저장", () =>
         {
@@ -79,7 +77,7 @@ public static class Dialogs
             if (!Path.IsPathFullyQualified(folder.Text.Trim())) { Message(window, "폴더 확인", "Drive 폴더의 전체 경로를 입력하세요."); return; }
             settings.Model = model.Text.Trim();
             if (!string.IsNullOrWhiteSpace(notionParent.Text) && !Guid.TryParse(notionParent.Text.Trim(), out _)) { Message(window, "Page ID 확인", "Notion Page ID를 입력하세요 (URL의 32자리 ID)."); return; }
-            settings.ProtectedNotionToken = Secrets.Protect(notionToken.Password.Trim()); settings.ProtectedGitHubToken = Secrets.Protect(githubToken.Password.Trim()); settings.NotionParentId = notionParent.Text.Trim();
+            settings.ProtectedNotionToken = Secrets.Protect(notionToken.Password.Trim()); settings.NotionParentId = notionParent.Text.Trim();
             settings.DeviceName = string.IsNullOrWhiteSpace(device.Text) ? Environment.MachineName : device.Text.Trim(); settings.ProtectedGeminiApiKey = Secrets.Protect(key.Password.Trim()); settings.AutomaticAi = autoAi.IsChecked == true; settings.AiEverySaves = n;
             settings.DriveSyncFolder = folder.Text.Trim(); settings.AutomaticFolderBackup = autoDrive.IsChecked == true; saved = true; window.DialogResult = true;
         }); DockPanel.SetDock(save, Dock.Bottom); dock.Children.Add(save); dock.Children.Add(scroll); window.ShowDialog(); return saved;

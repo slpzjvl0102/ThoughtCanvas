@@ -145,8 +145,6 @@ public class Settings
     public HashSet<string> OfflinePendingBoards { get; set; } = [];
     public string NotionParentId { get; set; } = "";
     public string ProtectedNotionToken { get; set; } = "";
-    // 자동 업데이트용 GitHub fine-grained token (ThoughtCanvas 저장소 Contents 읽기 전용) · DPAPI로 이 기기에만 저장
-    public string ProtectedGitHubToken { get; set; } = "";
     public string DeviceId { get; set; } = Guid.NewGuid().ToString("N");
     public string DeviceName { get; set; } = Environment.MachineName;
     public bool DarkMode { get; set; }
