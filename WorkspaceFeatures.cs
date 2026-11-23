@@ -174,7 +174,7 @@ public partial class MainWindow
             var accepted = store.Load(local.Id)!; accepted.AcceptedSnapshots.Add(entry.LocalId); accepted.Revision++; store.Save(accepted);
         }
         if (open || Surface.Board.Id == entry.BoardId) OpenBoard(store.Load(entry.BoardId)!);
-        UpdateBoards();
+        await RefreshLibrary(); UpdateBoards();
     }
     private async void SyncClick(object sender, RoutedEventArgs e)
     {
@@ -206,7 +206,7 @@ public partial class MainWindow
             }
             catch (Exception ex) when (ex is IOException or InvalidDataException or System.Text.Json.JsonException) { }
         }
-        library = result;
+        library = result; UpdateBoards();
         if (initialized)
         {
             var topic = TopicFilter.SelectedItem?.ToString(); updating = true;

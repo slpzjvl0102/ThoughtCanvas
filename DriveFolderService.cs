@@ -59,7 +59,7 @@ public static class DriveFolderService
     {
         var root = Root(folder);
         // Unique version directories avoid overwriting work from another device.
-        string destination = Path.Combine(root, "Boards", ExportService.SafeName(board.Title) + "_" + board.Id,
+        string destination = Path.Combine(BoardFolder(Path.Combine(root, "Boards"), board),
             ExportService.SafeName(deviceId), $"v{board.Revision}_{DateTime.UtcNow:yyyyMMdd_HHmmss_fff}_{Guid.NewGuid():N}");
         Directory.CreateDirectory(destination);
         foreach (string file in Directory.EnumerateFiles(export, "*", SearchOption.AllDirectories))
@@ -74,7 +74,51 @@ public static class DriveFolderService
         ZipFile.CreateFromDirectory(export, pending);
         token.ThrowIfCancellationRequested();
         File.Move(pending, Path.Combine(destination, "snapshot.zip"));
+        Prune(Path.GetDirectoryName(destination)!, destination);
         return destination;
+    }
+    public const int KeepVersions = 5;
+    // 같은 Board(ID)의 백업은 한 폴더에 모읍니다 (v0.6.9). 이름이 바뀌면 폴더 이름을 맞추고, 갈라진 옛 폴더는 합칩니다.
+    // 정리에 실패해도 백업 자체는 진행합니다.
+    public static string BoardFolder(string boards, Board board)
+    {
+        Directory.CreateDirectory(boards);
+        string wanted = Path.Combine(boards, ExportService.SafeName(board.Title) + "_" + board.Id);
+        var found = Directory.EnumerateDirectories(boards).Where(d => Path.GetFileName(d).EndsWith("_" + board.Id, StringComparison.Ordinal))
+            .OrderBy(d => d == wanted ? 0 : 1).ThenBy(d => Path.GetFileName(d), StringComparer.Ordinal).ToList();
+        if (found.Count == 0) return wanted;
+        string target = found[0];
+        foreach (var other in found.Skip(1)) Tidy(() => MergeInto(other, target));
+        if (target != wanted && !Directory.Exists(wanted)) Tidy(() => { Directory.Move(target, wanted); target = wanted; });
+        return target;
+    }
+    private static void MergeInto(string source, string target)
+    {
+        foreach (var device in Directory.EnumerateDirectories(source).ToList())
+        {
+            string destination = Path.Combine(target, Path.GetFileName(device)); Directory.CreateDirectory(destination);
+            // 완성된 저장본만 옮깁니다. 다른 기기가 아직 올리는 중인 폴더는 그대로 둡니다.
+            foreach (var version in Directory.EnumerateDirectories(device).ToList())
+            {
+                string to = Path.Combine(destination, Path.GetFileName(version));
+                if (File.Exists(Path.Combine(version, "snapshot.zip")) && !Directory.Exists(to)) Directory.Move(version, to);
+            }
+            if (!Directory.EnumerateFileSystemEntries(device).Any()) Directory.Delete(device);
+        }
+        if (!Directory.EnumerateFileSystemEntries(source).Any()) Directory.Delete(source);
+    }
+    // 이 기기 폴더에서 Revision 기준 최근 KeepVersions개만 남깁니다. 방금 올린 저장본과 미완성 폴더는 지우지 않습니다.
+    public static void Prune(string deviceFolder, string? keep = null, int count = KeepVersions)
+    {
+        static long Revision(string name) => name.StartsWith('v') && long.TryParse(name[1..].Split('_')[0], out var r) ? r : -1;
+        var complete = Directory.EnumerateDirectories(deviceFolder)
+            .Where(d => File.Exists(Path.Combine(d, "snapshot.zip")) && !File.Exists(Path.Combine(d, "snapshot.pending")))
+            .OrderByDescending(d => d == keep).ThenByDescending(d => Revision(Path.GetFileName(d))).ThenByDescending(d => Path.GetFileName(d), StringComparer.Ordinal).ToList();
+        foreach (var old in complete.Skip(count)) Tidy(() => Directory.Delete(old, true));
+    }
+    private static void Tidy(Action action)
+    {
+        try { action(); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
     public static BoardBundle Read(string path)
     {

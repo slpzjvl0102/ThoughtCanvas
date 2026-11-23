@@ -205,6 +205,17 @@ public static class SelfTests
             Assert(laptop.Revision == 3 && laptop.Title == "변경된 제목" && laptop.Path == Path.Combine(latest, "snapshot.zip"), "이름 변경 후 최신 저장본 선택 실패");
             Assert(DriveFolderService.Read(laptop.Path).Board.UserDocument == "노트북 수정 내용", "문서 복원 실패");
             Assert(laptop.LocalId != b.Id && laptop.LocalId == (laptop with { Path = Path.Combine("Z:\\", "v" , Path.GetFileName(Path.GetDirectoryName(laptop.Path))!, "snapshot.zip") }).LocalId, "PC 경로 변경 시 복사본 ID 불일치");
+            // v0.6.9: 이름을 바꿔도 Board 폴더는 하나, 갈라진 옛 폴더는 합침, 기기별 최근 5개만 보관.
+            var boards = Path.Combine(sync, "ThoughtCanvas", "Boards");
+            string[] Folders() => Directory.GetDirectories(boards).Where(d => d.EndsWith("_" + b.Id)).ToArray();
+            Assert(Folders().Length == 1 && Path.GetFileName(Folders()[0]) == "변경된 제목_" + b.Id, "이름 변경 시 폴더 분리");
+            var legacy = Path.Combine(boards, "옛 제목_" + b.Id, "laptop", "v0_legacy"); Directory.CreateDirectory(legacy);
+            File.Copy(laptop.Path, Path.Combine(legacy, "snapshot.zip"));
+            for (long r = 4; r <= 9; r++) { b.Revision = r; DriveFolderService.Publish(sync, "laptop", b, Export(), CancellationToken.None); }
+            var kept = Directory.GetDirectories(Path.Combine(Folders().Single(), "laptop"));
+            Assert(Folders().Length == 1 && kept.Length == DriveFolderService.KeepVersions && kept.All(d => !Path.GetFileName(d).StartsWith("v0_") && !Path.GetFileName(d).StartsWith("v2_")), "옛 폴더 합치기 또는 5개 보관 실패");
+            Assert(Directory.GetDirectories(Path.Combine(Folders().Single(), "pc")).Length == 1, "다른 기기 저장본 삭제됨");
+            Assert(DriveFolderService.Discover(sync, CancellationToken.None).Entries.Single(e => e.Device == "laptop").Revision == 9, "정리 후 최신 저장본 누락");
             using var cancelled = new CancellationTokenSource(); cancelled.Cancel();
             bool stopped = false; try { DriveFolderService.Discover(sync, cancelled.Token); } catch (OperationCanceledException) { stopped = true; }
             Assert(stopped, "목록 검색 취소 실패");

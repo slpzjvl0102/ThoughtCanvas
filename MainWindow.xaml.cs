@@ -144,10 +144,25 @@ public partial class MainWindow : Window
     private async void RefreshBoardsClick(object sender, RoutedEventArgs e) => await RefreshDriveBoards();
     private void UpdateBoards()
     {
-        updating = true; var items = store.List().Select(x => new BoardChoice(x.Id, x.Title)).ToList();
-        items.AddRange(driveEntries.Where(x => !items.Any(i => i.Id == x.LocalId)).Select(x => new BoardChoice(x.LocalId,
+        // 이 기기에 있는 Board는 한 줄만 보입니다 (v0.6.9). 다른 기기에 확인하지 않은 변경이 있으면 그 줄에 표시합니다.
+        // Drive(☁) 줄은 이 기기에 없는 Board만 보여 줍니다.
+        var items = store.List().Select(x => new BoardChoice(x.Id, RemotePending(x.Id) ? $"{x.Title} · ☁ 다른 기기 변경 있음" : x.Title)).ToList();
+        var local = items.Select(i => i.Id).ToHashSet();
+        items.AddRange(driveEntries.Where(x => !local.Contains(x.BoardId)).Select(x => new BoardChoice(x.LocalId,
             $"☁ {x.Title} · {DeviceLabel(x.Device)} · {x.ModifiedUtc.ToLocalTime():MM-dd HH:mm} · v{x.Revision}", x)));
-        BoardPicker.ItemsSource = items; BoardPicker.SelectedItem = items.FirstOrDefault(x => x.Id == Surface.Board.Id); updating = false;
+        // 목록이 그대로면 다시 넣지 않습니다 (15초마다 갱신될 때 펼친 목록이 닫히지 않도록).
+        if (BoardPicker.ItemsSource is List<BoardChoice> shown && shown.Select(x => x.Id + x.Title).SequenceEqual(items.Select(x => x.Id + x.Title)))
+        {
+            var current = shown.FirstOrDefault(x => x.Id == Surface.Board.Id);
+            if (!ReferenceEquals(BoardPicker.SelectedItem, current)) { updating = true; BoardPicker.SelectedItem = current; updating = false; }
+            return;
+        }
+        updating = true; BoardPicker.ItemsSource = items; BoardPicker.SelectedItem = items.FirstOrDefault(x => x.Id == Surface.Board.Id); updating = false;
+    }
+    private bool RemotePending(string id)
+    {
+        var accepted = library.FirstOrDefault(x => x.Remote == null && x.Board.Id == id)?.Board.AcceptedSnapshots ?? [];
+        return library.Any(x => x.Remote is { } r && x.Board.Id == id && r.Device != settings.DeviceId && !accepted.Contains(r.LocalId));
     }
     private async void BoardSelected(object sender, SelectionChangedEventArgs e)
     {
@@ -355,7 +370,7 @@ public partial class MainWindow : Window
         {
             string folder = settings.DriveSyncFolder; string device = settings.DeviceId;
             await Task.Run(() => DriveFolderService.Publish(folder, device, snapshot, export, lifetime.Token));
-            uploaded[snapshot.Id] = snapshot.Revision;
+            uploaded[snapshot.Id] = snapshot.Revision; lastCatalog = DateTime.MinValue; // 폴더 정리 후 목록을 바로 다시 읽습니다.
             settings.OfflinePendingBoards.Remove(snapshot.Id); store.SaveSettings(settings);
             SetStatus("Drive 폴더 저장 완료 · v" + snapshot.Revision + " · Cloud 업로드는 Google Drive에서 확인하세요.");
         }
@@ -386,7 +401,7 @@ public partial class MainWindow : Window
         catch (OperationCanceledException) { SetStatus("Drive 폴더 작업이 취소되었습니다."); } catch (Exception ex) { Error(ex); }
     }
     private async void SettingsClick(object sender, RoutedEventArgs e) { try { if (Dialogs.Settings(this, settings)) { uploaded.Clear(); store.SaveSettings(settings); SetStatus("설정을 저장했습니다."); lastConnectivity = DateTime.MinValue; await RefreshDriveBoards(); } } catch (Exception ex) { Error(ex); } }
-    private void HelpClick(object sender, RoutedEventArgs e) => Dialogs.DiagnosticMessage(this, "Prototype 사용 안내 · v0.6.8", "Pen: 필기 / S Pen Button: Pen → Eraser → Lasso\n한 손가락: 이동 / 두 손가락: 이동·확대 / 회전 없음\nMouse: 좌클릭 현재 Tool / 우클릭 이동 / Wheel Zoom\n휠클릭을 누른 채 방향으로 Drag하고 놓으면 Tool 선택\nText Tool: Click하여 생성, 기존 Text Click하여 수정\nLasso: 완전히 포함한 요소 선택, 선택 위 Drag로 이동\nShift+Click: Lasso에서 추가·해제 / Delete: 선택 삭제\nCtrl+Z / Ctrl+Y: 50회 Undo·Redo\n\nAI는 Gemini API key, Drive는 동기화 폴더 경로를 사용합니다. OAuth는 필요 없습니다.\n찾기: 모든 Board·Drive Keyword 검색 및 AI 관련 검색.\nDrive 목록에서 같은 Board를 이어 열 수 있습니다. 작업 → 다른 기기 변경 확인에서 유지·교체·빈 공간 통합을 선택합니다.\n작업 → 공동 편집: 같은 Network의 PC·노트북 연결. Export: PDF·HTML·Markdown·원본. 모바일은 이번 범위에서 제외되었습니다.\n\n" + Surface.PenInputSummary + "\n" + (rawPen?.Summary ?? "HID 초기화 전"));
+    private void HelpClick(object sender, RoutedEventArgs e) => Dialogs.DiagnosticMessage(this, "Prototype 사용 안내 · v0.6.9", "Pen: 필기 / S Pen Button: Pen → Eraser → Lasso\n한 손가락: 이동 / 두 손가락: 이동·확대 / 회전 없음\nMouse: 좌클릭 현재 Tool / 우클릭 이동 / Wheel Zoom\n휠클릭을 누른 채 방향으로 Drag하고 놓으면 Tool 선택\nText Tool: Click하여 생성, 기존 Text Click하여 수정\nLasso: 완전히 포함한 요소 선택, 선택 위 Drag로 이동\nShift+Click: Lasso에서 추가·해제 / Delete: 선택 삭제\nCtrl+Z / Ctrl+Y: 50회 Undo·Redo\n\nAI는 Gemini API key, Drive는 동기화 폴더 경로를 사용합니다. OAuth는 필요 없습니다.\n찾기: 모든 Board·Drive Keyword 검색 및 AI 관련 검색.\nDrive 목록에서 같은 Board를 이어 열 수 있습니다. 작업 → 다른 기기 변경 확인에서 유지·교체·빈 공간 통합을 선택합니다.\n작업 → 공동 편집: 같은 Network의 PC·노트북 연결. Export: PDF·HTML·Markdown·원본. 모바일은 이번 범위에서 제외되었습니다.\n\n" + Surface.PenInputSummary + "\n" + (rawPen?.Summary ?? "HID 초기화 전"));
     private void OpenRadial(Point p) { radialOrigin = p; radialChoice = null; DrawRadial(); }
     private void MoveRadial(Point p)
     {
