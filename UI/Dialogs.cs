@@ -72,10 +72,10 @@ public static class Dialogs
         bool saved = false;
         var save = Button("설정 저장", () =>
         {
-            if (!GeminiModels.IsValid(model.Text)) { Message(window, "Model 확인", "gemini-3.8-flash와 같은 Gemini 3 계열 Model ID를 입력하세요. 대체 Model은 쉼표로 구분합니다."); return; }
+            if (!ThoughtCanvas.Settings.IsSupportedModel(model.Text.Trim())) { Message(window, "Model 확인", "gemini-3.8-flash와 같은 Gemini 3 계열 Model ID를 입력하세요."); return; }
             if (!int.TryParse(count.Text, out int n) || n < 1 || n > 1000) { Message(window, "입력 확인", "저장 횟수는 1~1000 사이로 입력하세요."); return; }
             if (!Path.IsPathFullyQualified(folder.Text.Trim())) { Message(window, "폴더 확인", "Drive 폴더의 전체 경로를 입력하세요."); return; }
-            settings.Model = string.Join(", ", GeminiModels.Chain(model.Text));
+            settings.Model = model.Text.Trim();
             if (!string.IsNullOrWhiteSpace(notionParent.Text) && !Guid.TryParse(notionParent.Text.Trim(), out _)) { Message(window, "Page ID 확인", "Notion Page ID를 입력하세요 (URL의 32자리 ID)."); return; }
             settings.ProtectedNotionToken = Secrets.Protect(notionToken.Password.Trim()); settings.NotionParentId = notionParent.Text.Trim();
             settings.DeviceName = string.IsNullOrWhiteSpace(device.Text) ? Environment.MachineName : device.Text.Trim(); settings.ProtectedGeminiApiKey = Secrets.Protect(key.Password.Trim()); settings.AutomaticAi = autoAi.IsChecked == true; settings.AiEverySaves = n;

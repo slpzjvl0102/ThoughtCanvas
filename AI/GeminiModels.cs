@@ -10,11 +10,11 @@ public static class GeminiModels
 {
     public static List<string> Chain(string? setting) =>
         (setting ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.Ordinal).ToList();
-    public static bool IsValid(string? setting) { var chain = Chain(setting); return chain.Count > 0 && chain.All(Settings.IsSupportedModel); }
+    public static bool IsValid(string? setting) => Settings.IsSupportedModel(setting ?? "");
     public static async Task<(HttpResponseMessage Response, string Model)> Send(HttpClient client, string setting, string key, string json, CancellationToken token)
     {
         var chain = Chain(setting);
-        if (chain.Count == 0 || !chain.All(Settings.IsSupportedModel)) throw new InvalidOperationException("Gemini 3 계열 Model 설정을 확인하세요.");
+        if (chain.Count == 0 || !chain.All(Settings.IsSingleModel)) throw new InvalidOperationException("Gemini 3 계열 Model 설정을 확인하세요.");
         for (int i = 0; ; i++)
         {
             using var request = new HttpRequestMessage(HttpMethod.Post, $"https://generativelanguage.googleapis.com/v1beta/models/{Uri.EscapeDataString(chain[i])}:generateContent");
