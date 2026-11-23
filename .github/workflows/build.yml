@@ -1,0 +1,53 @@
+name: Build and self-test
+
+on:
+  push:
+    paths-ignore:
+      - '**.txt'
+  pull_request:
+    paths-ignore:
+      - '**.txt'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build
+        run: dotnet build ThoughtCanvas.csproj -c Release -nologo -warnaserror
+
+      # 앱의 "자동 검증" 버튼과 같은 경로: 실행 파일을 --self-test로 실행하고 종료 코드로 성공 여부를 판단합니다.
+      - name: Self-test
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem bin/Release -Recurse -Filter ThoughtCanvas.exe | Select-Object -First 1
+          if (-not $exe) { throw "ThoughtCanvas.exe not found" }
+          $report = Join-Path $env:RUNNER_TEMP 'self-test.txt'
+          $p = Start-Process -FilePath $exe.FullName -ArgumentList '--self-test', "`"$report`"" -Wait -PassThru
+          if (Test-Path $report) {
+            $text = Get-Content $report -Raw -Encoding utf8
+            Write-Output $text
+            "자동 검증: " + ($text -split "`n")[1] | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          } else {
+            throw "self-test report was not written (exit code $($p.ExitCode))"
+          }
+          if ($p.ExitCode -ne 0) { throw "self-test failed (exit code $($p.ExitCode))" }
+
+      - name: Upload self-test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: self-test-report
+          path: ${{ runner.temp }}/self-test.txt
+          if-no-files-found: ignore
