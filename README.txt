@@ -3,7 +3,7 @@ ThoughtCanvas — Windows Prototype 0.6.2
 
 시작
 1. ZIP 전체를 새 폴더에 압축 해제하고 ThoughtCanvas.exe를 실행합니다.
-2. PC와 노트북 모두 같은 0.6.3 버전을 사용하세요.
+2. PC와 노트북 모두 같은 0.6.5 버전을 사용하세요.
 3. 작업 → 연결 설정에서 기기 이름과 각 기기의 Google Drive 폴더 경로를 설정합니다.
 4. 기존 Local 데이터(%LOCALAPPDATA%\ThoughtCanvas)는 유지됩니다. 이전 실행파일은 닫고 새 버전을 실행하세요.
 
@@ -107,3 +107,11 @@ Offline 중 편집은 이전과 같이 미전송 작업으로 기록됩니다.
 S Pen Button 감지 3경로(HID Raw Input 우선, Windows Pen, WPF Stylus)와 판정 규칙은 그대로이며, Button과 무관한 크기 원 중복 갱신과 Report마다의 메모리 할당을 줄였습니다.
 Canvas를 Layer로 나눴습니다: 배경·Grid / 완성된 Stroke / Text·선택 표시 / 그리는 중인 Stroke. 필기 중에는 그리는 중인 Stroke만 다시 그리고, 화면 이동 시 Stroke를 다시 그리지 않습니다.
 선택 이동(Lasso Drag)은 선택된 Stroke만 다시 만듭니다.
+0.6.4 Lasso 이동
+선택을 끄는 동안에는 선택된 Stroke의 표시 위치만 옮기고, 실제 좌표와 획 모양은 펜·마우스를 뗄 때 한 번 반영합니다. 선택이 많아도 이동 중 부담이 거의 늘지 않습니다.
+Lasso 선택 판정 전에 경계 범위로 먼저 걸러 큰 Board에서 선택 완료가 빨라졌습니다.
+실행 폴더에는 WPF 메시지 리소스를 한국어만 포함합니다.
+0.6.5 Text 크기·표시 수정
+Text Tool을 고르거나 Text를 편집하는 동안 크기 슬라이더가 글자 크기(8~72)를 조절합니다. 편집 중인 Text에는 바로 적용되고, 이후 새로 만드는 Text도 같은 크기로 만들어집니다.
+슬라이더를 움직여도 Text 편집이 끝나지 않습니다.
+앱을 처음 열 때나 창 크기를 바꾼 직후 일부 Text가 보이지 않던 문제(0.6.3부터)를 수정했습니다.

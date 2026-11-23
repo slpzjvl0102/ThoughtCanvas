@@ -1,3 +1,12 @@
+ThoughtCanvas v0.6.5 · 2026-11-13
+0.6.4 사용자 실행 자동 검증 51/52 (53번째 실제 저장본 비교는 THOUGHTCANVAS_AUDIT_INPUT 설정 시에만 실행). 실패: Dark mode 원본 복원.
+원인: Text Layer가 화면 범위를 이전 배치 크기(ActualWidth)로 계산해 첫 배치·창 크기 변경 시 Text 누락. 수정: 배치 크기를 먼저 기록해 사용, Layer 배치를 직접 수행.
+추가: Text 글자 크기 조절(Text Tool·편집 중 슬라이더 8~72, 편집 중 즉시 적용, 새 Text 기본값), 슬라이더 조작 시 편집 유지.
+빌드 성공(경고 0). 자동 검증과 실기기 확인은 Windows에서 필요.
+ThoughtCanvas v0.6.4 · 2026-11-13
+Lasso 이동 부담 개선. 원인: 펜 점마다 선택 항목 전체 탐색, 원본 사본 선형 검색(선택 수×전체 Stroke), 좌표·획 모양 재생성.
+변경: 드래그 중 공유 Transform으로 표시만 이동, 종료 시 1회 좌표 반영·Undo 기록, 시작 시 원래 좌표 1회 확보, 선택 판정 경계 선필터, 드래그 중 저장 시 이동 위치 반영.
+빌드 성공(경고 0). 자동 검증과 실기기 확인은 Windows에서 필요.
 ThoughtCanvas v0.6.3 · 2026-11-13
 Pen 필기 지연 개선. 원인: StylusPoint마다 네트워크 상태·Drive 폴더(Directory.Exists) 확인, Pen 1회 이동에 크기 원 3~4회 갱신, 매 Frame 전체 Canvas 재렌더링.
 변경: MarkChanged 캐시화(백그라운드 5초·Network 변경·설정 저장 시 확인), 입력 묶음당 1회 알림, UpdatePointer 변경분만 적용, Raw Input 버퍼·Collection 캐시 재사용, 렌더링 Layer 분리.

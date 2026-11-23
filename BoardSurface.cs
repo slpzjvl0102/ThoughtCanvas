@@ -64,6 +64,20 @@ public class BoardSurface : Canvas
         var visible = whiteStrokes.GetValue(stroke, original => { var copy = original.Clone(); copy.DrawingAttributes.Color = Colors.White; return copy; }); visible.Draw(dc);
     }
     public double PenWidth { get; set; } = 2.5;
+    /// <summary>새로 만드는 Text의 글자 크기 (v0.6.5).</summary>
+    public double TextSize { get; set; } = 18;
+    /// <summary>크기 조절이 Text에 적용되는 상태: Text Tool이거나 Text를 편집 중일 때.</summary>
+    public bool SizeTargetsText => Tool == CanvasTool.Text || editor != null;
+    /// <summary>편집 중인 Text가 있으면 그 크기, 없으면 새 Text 크기.</summary>
+    public double CurrentTextSize => editedText?.FontSize ?? TextSize;
+    /// <summary>편집 중 포커스가 이 요소로 옮겨가도 편집을 끝내지 않을지 판단합니다 (예: 크기 슬라이더).</summary>
+    public Func<IInputElement?, bool>? KeepEditorOpen { get; set; }
+    public void SetEditingFontSize(double size)
+    {
+        if (editor == null || editedText == null || editedText.FontSize == size) return;
+        editedText.FontSize = size; editor.FontSize = size * Board.Zoom; DraftChanged?.Invoke();
+    }
+    public void FocusEditor() => editor?.Focus();
     public double EraserSize { get; set; } = 24;
     public string PenColor { get; set; } = "#243047";
     public HashSet<string> Selection { get; } = [];
@@ -82,6 +96,11 @@ public class BoardSurface : Canvas
     private readonly List<Point> lasso = [];
     private CanvasSnapshot? before;
     private Point lastScreen, lastWorld, dragOrigin;
+    // Lasso 이동 (v0.6.4): 드래그 중에는 선택된 Stroke의 표시 위치만 옮기고, 좌표는 펜을 뗄 때 한 번 반영합니다.
+    private List<(InkItem Item, List<Sample> Points)>? dragInk;
+    private List<(TextItem Item, double X, double Y)>? dragTexts;
+    private Vector dragDelta;
+    private readonly TranslateTransform dragTransform = new();
     private bool active, moved, penDown, panning, draggingSelection, radial;
     private DateTime suppressMouseUntil;
     private readonly PenButtonGate buttonGate = new();
@@ -190,17 +209,31 @@ public class BoardSurface : Canvas
         LostMouseCapture += (_, _) => { if (active) EndGesture(); panning = false; };
         SyncView();
     }
+    // Layer는 Canvas 전체 크기로 배치합니다. Text Layer가 화면 범위를 계산할 때 이번 배치 크기를 쓰도록
+    // Canvas 크기가 확정되기 전에 layoutSize를 먼저 기록합니다 (v0.6.5: 첫 표시·창 크기 변경 시 Text 누락 수정).
+    private Size layoutSize = Size.Empty;
     protected override Size ArrangeOverride(Size arrangeSize)
     {
-        var size = base.ArrangeOverride(arrangeSize);
+        if (layoutSize != arrangeSize) { layoutSize = arrangeSize; overlayLayer.InvalidateVisual(); }
         var full = new Rect(arrangeSize);
-        inkLayer.Arrange(full); overlayLayer.Arrange(full); liveLayer.Arrange(full);
-        return size;
+        foreach (UIElement child in InternalChildren)
+        {
+            if (ReferenceEquals(child, inkLayer) || ReferenceEquals(child, overlayLayer) || ReferenceEquals(child, liveLayer)) { child.Arrange(full); continue; }
+            double x = GetLeft(child), y = GetTop(child);
+            child.Arrange(new Rect(new Point(double.IsNaN(x) ? 0 : x, double.IsNaN(y) ? 0 : y), child.DesiredSize));
+        }
+        return arrangeSize;
     }
     public bool IsEditing => active || editor != null;
     public Board CaptureForSave()
     {
         var snapshot = DataJson.Clone(Board);
+        // 드래그 중 저장되면, 화면에 보이는 이동 위치를 저장본에도 반영합니다.
+        if (dragInk != null && dragDelta.Length > .01)
+        {
+            var ids = dragInk.Select(d => d.Item.Id).ToHashSet();
+            foreach (var ink in snapshot.Ink.Where(i => ids.Contains(i.Id))) ink.Points = ink.Points.Select(p => new Sample(p.X + dragDelta.X, p.Y + dragDelta.Y, p.Pressure)).ToList();
+        }
         if (live is { Count: > 0 }) snapshot.Ink.Add(new() { Id = liveId, Points = live.ToList(), Color = PenColor, Width = PenWidth });
         if (editor != null && editedText != null)
         {
@@ -244,12 +277,17 @@ public class BoardSurface : Canvas
     private void RenderOverlay(DrawingContext dc)
     {
         // viewTransform이 Layer에 적용되어 있으므로 World 좌표로 그립니다.
-        var viewport = new Rect(ToWorld(new Point(0, 0)), ToWorld(new Point(ActualWidth, ActualHeight)));
+        var visible = layoutSize.IsEmpty ? RenderSize : layoutSize;
+        var viewport = new Rect(ToWorld(new Point(0, 0)), ToWorld(new Point(visible.Width, visible.Height)));
         if (Selection.Count > 0)
         {
             var dashed = new Pen(Brushes.Teal, 1 / Board.Zoom) { DashStyle = DashStyles.Dash }; dashed.Freeze();
             foreach (var item in Board.Ink)
-                if (Selection.Contains(item.Id) && strokes.TryGetValue(item.Id, out var stroke)) dc.DrawRectangle(null, dashed, stroke.GetBounds());
+                if (Selection.Contains(item.Id) && strokes.TryGetValue(item.Id, out var stroke))
+                {
+                    var bounds = stroke.GetBounds(); if (dragInk != null) bounds.Offset(dragDelta);
+                    dc.DrawRectangle(null, dashed, bounds);
+                }
         }
         foreach (var text in Board.Texts)
         {
@@ -287,7 +325,7 @@ public class BoardSurface : Canvas
         if (Tool == CanvasTool.Text)
         {
             active = false; var hit = Hit(lastWorld); var t = Board.Texts.FirstOrDefault(x => x.Id == hit);
-            if (t == null) { t = new TextItem { X = lastWorld.X, Y = lastWorld.Y }; Board.Texts.Add(t); }
+            if (t == null) { t = new TextItem { X = lastWorld.X, Y = lastWorld.Y, FontSize = TextSize }; Board.Texts.Add(t); }
             OpenEditor(t); return;
         }
         if (Tool == CanvasTool.Pen)
@@ -305,7 +343,7 @@ public class BoardSurface : Canvas
             {
                 if (hit != null && !Selection.Add(hit)) Selection.Remove(hit); active = false;
             }
-            else if (hit != null && Selection.Contains(hit)) draggingSelection = true;
+            else if (hit != null && Selection.Contains(hit)) BeginSelectionDrag();
             else { Selection.Clear(); lasso.Clear(); lasso.Add(lastWorld); }
         }
         Redraw();
@@ -322,19 +360,8 @@ public class BoardSurface : Canvas
         if (Tool == CanvasTool.Eraser) Erase(lastWorld, world);
         if (Tool == CanvasTool.Lasso)
         {
-            if (draggingSelection && before != null)
-            {
-                var delta = world - dragOrigin;
-                foreach (var i in Board.Ink.Where(i => Selection.Contains(i.Id)))
-                {
-                    var original = before.Ink.First(x => x.Id == i.Id); i.Points = original.Points.Select(p => new Sample(p.X + delta.X, p.Y + delta.Y, p.Pressure)).ToList();
-                    // 선택된 Stroke만 다시 만듭니다 (이전: 매 점마다 전체 Rebuild).
-                    if (i.Points.Count > 0) { var stroke = i.ToStroke(); strokes[i.Id] = stroke; RenderInk(i.Id, stroke); }
-                }
-                foreach (var t in Board.Texts.Where(i => Selection.Contains(i.Id)))
-                { var original = before.Texts.First(x => x.Id == t.Id); t.X = original.X + delta.X; t.Y = original.Y + delta.Y; }
-                moved = delta.Length > .01; overlayLayer.InvalidateVisual();
-            }
+            // 점마다 이동량만 기록하고, 화면 반영은 NotifyDraft()에서 이벤트당 한 번 합니다.
+            if (draggingSelection) { dragDelta = world - dragOrigin; moved = dragDelta.Length > .01; }
             else lasso.Add(world);
         }
         lastWorld = world; lastScreen = screen; if (notify) NotifyDraft();
@@ -342,9 +369,38 @@ public class BoardSurface : Canvas
     private void NotifyDraft()
     {
         if (!active) return;
+        if (draggingSelection) ApplySelectionDrag();
         if (Tool != CanvasTool.Lasso || draggingSelection) DraftChanged?.Invoke();
         // 필기 중에는 그리는 중인 Stroke Layer만 다시 그립니다. Eraser는 Erase()에서 바뀐 Stroke만 갱신합니다.
         if (Tool is CanvasTool.Pen or CanvasTool.Lasso) liveLayer.InvalidateVisual();
+    }
+    private void BeginSelectionDrag()
+    {
+        draggingSelection = true; dragDelta = new Vector(); dragTransform.X = dragTransform.Y = 0;
+        // 원래 좌표를 한 번만 확보합니다. 드래그 중에는 Points 목록을 바꾸지 않으므로 참조를 그대로 보관합니다.
+        dragInk = [.. Board.Ink.Where(i => Selection.Contains(i.Id)).Select(i => (i, i.Points))];
+        dragTexts = [.. Board.Texts.Where(t => Selection.Contains(t.Id)).Select(t => (t, t.X, t.Y))];
+        foreach (var (item, _) in dragInk) inkLayer.SetTransform(item.Id, dragTransform);
+    }
+    private void ApplySelectionDrag()
+    {
+        // 선택된 Stroke는 하나의 공유 Transform으로 한꺼번에 이동합니다 (Stroke 재생성 없음).
+        dragTransform.X = dragDelta.X; dragTransform.Y = dragDelta.Y;
+        if (dragTexts is { Count: > 0 }) foreach (var (text, x, y) in dragTexts) { text.X = x + dragDelta.X; text.Y = y + dragDelta.Y; }
+        overlayLayer.InvalidateVisual();
+    }
+    private void CommitSelectionDrag()
+    {
+        if (dragInk != null)
+            foreach (var (item, points) in dragInk)
+            {
+                inkLayer.SetTransform(item.Id, null);
+                if (!moved) continue;
+                item.Points = points.Select(p => new Sample(p.X + dragDelta.X, p.Y + dragDelta.Y, p.Pressure)).ToList();
+                if (item.Points.Count > 0) { var stroke = item.ToStroke(); strokes[item.Id] = stroke; RenderInk(item.Id, stroke); }
+            }
+        if (dragTexts != null && !moved) foreach (var (text, x, y) in dragTexts) { text.X = x; text.Y = y; }
+        dragInk = null; dragTexts = null; dragDelta = new Vector(); dragTransform.X = dragTransform.Y = 0;
     }
     private void Erase(Point a, Point b)
     {
@@ -365,12 +421,15 @@ public class BoardSurface : Canvas
     {
         if (!active) return;
         bool penStroke = live != null;
+        if (draggingSelection) CommitSelectionDrag();
         if (live is { Count: > 0 }) { var ink = new InkItem { Id = liveId, Points = live, Width = PenWidth, Color = PenColor }; Board.Ink.Add(ink); var stroke = ink.ToStroke(); strokes[ink.Id] = stroke; RenderInk(ink.Id, stroke); moved = true; }
         if (lasso.Count > 2)
         {
             var shape = Polygon(lasso);
-            foreach (var (id, stroke) in strokes) if (FullyInside(shape, stroke.GetGeometry())) Selection.Add(id);
-            foreach (var text in Board.Texts) if (FullyInside(shape, new RectangleGeometry(TextBounds(text)))) Selection.Add(text.Id);
+            // 완전히 포함되려면 경계 상자도 Lasso 경계 안에 있어야 하므로, 정밀 비교 전에 범위로 먼저 거릅니다.
+            var area = shape.Bounds; area.Inflate(1, 1);
+            foreach (var (id, stroke) in strokes) if (area.Contains(stroke.GetBounds()) && FullyInside(shape, stroke.GetGeometry())) Selection.Add(id);
+            foreach (var text in Board.Texts) { var bounds = TextBounds(text); if (area.Contains(bounds) && FullyInside(shape, new RectangleGeometry(bounds))) Selection.Add(text.Id); }
         }
         live = null; liveStroke = null; lasso.Clear(); active = false; draggingSelection = false;
         if (moved && before != null) { History.Push(before); Changed?.Invoke(); }
@@ -487,8 +546,9 @@ public class BoardSurface : Canvas
         SetLeft(editor, p.X); SetTop(editor, p.Y); Children.Add(editor);
         editor.PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape || (e.Key == Key.Enter && Keyboard.Modifiers.HasFlag(ModifierKeys.Control))) { CommitEditor(); e.Handled = true; } };
         editor.TextChanged += (_, _) => DraftChanged?.Invoke();
-        editor.LostKeyboardFocus += (_, _) => { if (editor != null) CommitEditor(); };
+        editor.LostKeyboardFocus += (_, e) => { if (editor != null && KeepEditorOpen?.Invoke(e.NewFocus) != true) CommitEditor(); };
         editor.Focus(); editor.CaretIndex = editor.Text.Length; Redraw();
+        ToolChanged?.Invoke(); // 크기 슬라이더가 편집 중인 Text 크기를 표시하도록 갱신
     }
     public void CommitEditor()
     {
@@ -496,7 +556,7 @@ public class BoardSurface : Canvas
         var box = editor; var text = editedText; editor = null; editedText = null;
         text.Text = box.Text; Children.Remove(box); if (string.IsNullOrWhiteSpace(text.Text)) Board.Texts.Remove(text);
         if (before != null && DataJson.Write(before) != DataJson.Write(CanvasHistory.Capture(Board))) { History.Push(before); Changed?.Invoke(); }
-        before = null; Redraw();
+        before = null; Redraw(); ToolChanged?.Invoke();
     }
     public void Undo() { CommitEditor(); EndGesture(); if (History.Undo(Board)) { Selection.Clear(); Rebuild(); Changed?.Invoke(); } }
     public void ApplyCanvas(Board arranged)
@@ -536,6 +596,7 @@ public class BoardSurface : Canvas
             using var dc = visual.RenderOpen(); draw(dc);
         }
         public void Remove(string id) { if (visuals.Remove(id, out var visual)) children.Remove(visual); }
+        public void SetTransform(string id, Transform? transform) { if (visuals.TryGetValue(id, out var visual)) visual.Transform = transform; }
     }
     private sealed class DrawLayer(Action<DrawingContext> render) : FrameworkElement
     {

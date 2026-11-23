@@ -41,6 +41,8 @@ public partial class MainWindow : Window
         Surface.DraftChanged += () => MarkChanged(true);
         Surface.ViewChanged += () => { dirty = true; ZoomButton.Content = $"{Surface.Board.Zoom:P0}"; };
         Surface.ToolChanged += UpdateTool;
+        // 크기 슬라이더를 조작해도 Text 편집이 끝나지 않도록 합니다.
+        Surface.KeepEditorOpen = focus => focus is Visual target && (ReferenceEquals(target, SizeControls) || target.IsDescendantOf(SizeControls));
         Surface.RadialOpened += OpenRadial; Surface.RadialMoved += MoveRadial; Surface.RadialClosed += CloseRadial;
         initialized = true; ApplyTheme(); ApplyFocus(); UpdateBoards(); UpdatePanels(); UpdateTool(); UpdateCounts();
         timer.Tick += TimerTick; timer.Start(); Closing += OnClosing;
@@ -182,17 +184,40 @@ public partial class MainWindow : Window
     private void UpdateTool()
     {
         foreach (var button in new[] { PenButton, EraserButton, LassoButton, TextButton }) button.SetResourceReference(Control.BackgroundProperty, (string)button.Tag == Surface.Tool.ToString() ? "SelectedBrush" : "SurfaceBrush");
-        updating = true; SizeSlider.Maximum = Surface.Tool == CanvasTool.Eraser ? 100 : 12; SizeSlider.Value = Surface.Tool == CanvasTool.Eraser ? Surface.EraserSize : Surface.PenWidth; SizeLabel.Text = SizeSlider.Value.ToString("0.#"); updating = false; UpdateSizePreview();
+        bool text = Surface.SizeTargetsText;
+        updating = true;
+        SizeSlider.IsSnapToTickEnabled = text; SizeSlider.TickFrequency = 1;
+        SizeSlider.Minimum = text ? 8 : 1; SizeSlider.Maximum = text ? 72 : Surface.Tool == CanvasTool.Eraser ? 100 : 12;
+        SizeSlider.Value = text ? Surface.CurrentTextSize : Surface.Tool == CanvasTool.Eraser ? Surface.EraserSize : Surface.PenWidth;
+        SizeLabel.Text = SizeSlider.Value.ToString("0.#"); updating = false; UpdateSizePreview();
     }
-    private void ToolSizeChanged(object sender, RoutedPropertyChangedEventArgs<double> e) { if (!initialized || updating) return; if (Surface.Tool == CanvasTool.Eraser) Surface.EraserSize = e.NewValue; else Surface.PenWidth = e.NewValue; SizeLabel.Text = e.NewValue.ToString("0.#"); UpdateSizePreview(); }
+    private void ToolSizeChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (!initialized || updating) return;
+        // Text Tool 또는 Text 편집 중에는 글자 크기를 바꿉니다 (새 Text 기본값 + 편집 중인 Text에 즉시 적용).
+        if (Surface.SizeTargetsText) { double size = Math.Round(e.NewValue); Surface.TextSize = size; Surface.SetEditingFontSize(size); }
+        else if (Surface.Tool == CanvasTool.Eraser) Surface.EraserSize = e.NewValue; else Surface.PenWidth = e.NewValue;
+        SizeLabel.Text = e.NewValue.ToString("0.#"); UpdateSizePreview();
+    }
     private void UpdateSizePreview()
     {
-        bool sized = Surface.Tool is CanvasTool.Pen or CanvasTool.Eraser;
+        bool text = Surface.SizeTargetsText;
+        bool sized = text || Surface.Tool is CanvasTool.Pen or CanvasTool.Eraser;
         SizeControls.IsEnabled = sized;
-        double size = Surface.Tool == CanvasTool.Eraser ? Surface.EraserSize : Surface.PenWidth;
-        SizePreview.Width = SizePreview.Height = Math.Min(26, size);
-        SizePreview.Fill = Surface.Tool == CanvasTool.Eraser ? Brushes.Transparent : (Brush)FindResource("TextBrush");
-        SizeControls.ToolTip = $"Canvas 기준 지름 {size:0.#} · 화면에서는 Zoom에 따라 크기가 달라집니다. 미리보기는 최대 26으로 축소 표시합니다.";
+        if (text)
+        {
+            double fontSize = Surface.CurrentTextSize;
+            SizePreview.Visibility = Visibility.Collapsed; SizePreviewText.Visibility = Visibility.Visible; SizePreviewText.FontSize = Math.Min(26, fontSize);
+            SizeControls.ToolTip = $"글자 크기 {fontSize:0} · 새 Text와 편집 중인 Text에 적용됩니다. 미리보기는 최대 26으로 축소 표시합니다.";
+        }
+        else
+        {
+            double size = Surface.Tool == CanvasTool.Eraser ? Surface.EraserSize : Surface.PenWidth;
+            SizePreview.Visibility = Visibility.Visible; SizePreviewText.Visibility = Visibility.Collapsed;
+            SizePreview.Width = SizePreview.Height = Math.Min(26, size);
+            SizePreview.Fill = Surface.Tool == CanvasTool.Eraser ? Brushes.Transparent : (Brush)FindResource("TextBrush");
+            SizeControls.ToolTip = $"Canvas 기준 지름 {size:0.#} · 화면에서는 Zoom에 따라 크기가 달라집니다. 미리보기는 최대 26으로 축소 표시합니다.";
+        }
         Surface.UpdatePointer();
     }
     private void ToggleFocus(object sender, RoutedEventArgs e)
@@ -361,7 +386,7 @@ public partial class MainWindow : Window
         catch (OperationCanceledException) { SetStatus("Drive 폴더 작업이 취소되었습니다."); } catch (Exception ex) { Error(ex); }
     }
     private async void SettingsClick(object sender, RoutedEventArgs e) { try { if (Dialogs.Settings(this, settings)) { uploaded.Clear(); store.SaveSettings(settings); SetStatus("설정을 저장했습니다."); lastConnectivity = DateTime.MinValue; await RefreshDriveBoards(); } } catch (Exception ex) { Error(ex); } }
-    private void HelpClick(object sender, RoutedEventArgs e) => Dialogs.DiagnosticMessage(this, "Prototype 사용 안내 · v0.6.3", "Pen: 필기 / S Pen Button: Pen → Eraser → Lasso\n한 손가락: 이동 / 두 손가락: 이동·확대 / 회전 없음\nMouse: 좌클릭 현재 Tool / 우클릭 이동 / Wheel Zoom\n휠클릭을 누른 채 방향으로 Drag하고 놓으면 Tool 선택\nText Tool: Click하여 생성, 기존 Text Click하여 수정\nLasso: 완전히 포함한 요소 선택, 선택 위 Drag로 이동\nShift+Click: Lasso에서 추가·해제 / Delete: 선택 삭제\nCtrl+Z / Ctrl+Y: 50회 Undo·Redo\n\nAI는 Gemini API key, Drive는 동기화 폴더 경로를 사용합니다. OAuth는 필요 없습니다.\n찾기: 모든 Board·Drive Keyword 검색 및 AI 관련 검색.\nDrive 목록에서 같은 Board를 이어 열 수 있습니다. 작업 → 다른 기기 변경 확인에서 유지·교체·빈 공간 통합을 선택합니다.\n작업 → 공동 편집: 같은 Network의 PC·노트북 연결. Export: PDF·HTML·Markdown·원본. 모바일은 이번 범위에서 제외되었습니다.\n\n" + Surface.PenInputSummary + "\n" + (rawPen?.Summary ?? "HID 초기화 전"));
+    private void HelpClick(object sender, RoutedEventArgs e) => Dialogs.DiagnosticMessage(this, "Prototype 사용 안내 · v0.6.5", "Pen: 필기 / S Pen Button: Pen → Eraser → Lasso\n한 손가락: 이동 / 두 손가락: 이동·확대 / 회전 없음\nMouse: 좌클릭 현재 Tool / 우클릭 이동 / Wheel Zoom\n휠클릭을 누른 채 방향으로 Drag하고 놓으면 Tool 선택\nText Tool: Click하여 생성, 기존 Text Click하여 수정\nLasso: 완전히 포함한 요소 선택, 선택 위 Drag로 이동\nShift+Click: Lasso에서 추가·해제 / Delete: 선택 삭제\nCtrl+Z / Ctrl+Y: 50회 Undo·Redo\n\nAI는 Gemini API key, Drive는 동기화 폴더 경로를 사용합니다. OAuth는 필요 없습니다.\n찾기: 모든 Board·Drive Keyword 검색 및 AI 관련 검색.\nDrive 목록에서 같은 Board를 이어 열 수 있습니다. 작업 → 다른 기기 변경 확인에서 유지·교체·빈 공간 통합을 선택합니다.\n작업 → 공동 편집: 같은 Network의 PC·노트북 연결. Export: PDF·HTML·Markdown·원본. 모바일은 이번 범위에서 제외되었습니다.\n\n" + Surface.PenInputSummary + "\n" + (rawPen?.Summary ?? "HID 초기화 전"));
     private void OpenRadial(Point p) { radialOrigin = p; radialChoice = null; DrawRadial(); }
     private void MoveRadial(Point p)
     {
