@@ -136,6 +136,26 @@ public static class FeatureTests
             }
             finally { Environment.SetEnvironmentVariable("THOUGHTCANVAS_DATA", previous); }
         });
+        test("UI: 세로 화면 툴바 오른쪽 배치·가로 복원", () =>
+        {
+            string? previous = Environment.GetEnvironmentVariable("THOUGHTCANVAS_DATA");
+            string folder = Path.Combine(root, "ui-vertical"); var store = new BoardStore(folder);
+            store.SaveSettings(new() { DriveSyncFolder = root, AutomaticAi = false, AutomaticFolderBackup = false });
+            Environment.SetEnvironmentVariable("THOUGHTCANVAS_DATA", folder);
+            try
+            {
+                var window = new MainWindow(); var content = (FrameworkElement)window.Content;
+                void Layout(double w, double h) { content.Measure(new Size(w, h)); content.Arrange(new Rect(0, 0, w, h)); content.UpdateLayout(); }
+                window.ApplyToolbarLayout(true); Layout(720, 1200);
+                assert(ReferenceEquals(window.ToolsBar.Parent, window.ContentGrid) && System.Windows.Controls.Grid.GetColumn(window.ToolsBar) == 1, "세로 툴바가 Canvas 오른쪽에 없음");
+                assert(window.ToolsBar.ActualWidth > 60 && window.ToolsBar.ActualWidth < 260 && window.CanvasHost.ActualWidth > 400, "세로 툴바 폭 이상: " + window.ToolsBar.ActualWidth);
+                assert(window.SizeSlider.Orientation == System.Windows.Controls.Orientation.Vertical, "굵기 슬라이더 세로 전환 실패");
+                window.ApplyToolbarLayout(false); Layout(1060, 760);
+                assert(ReferenceEquals(window.ToolsBar.Parent, window.RootGrid) && System.Windows.Controls.Grid.GetRow(window.ToolsBar) == 1 && window.CanvasHost.ActualWidth == 1060, "가로 툴바 복원 실패");
+                window.Close();
+            }
+            finally { Environment.SetEnvironmentVariable("THOUGHTCANVAS_DATA", previous); }
+        });
         test("Notion: 긴 문서·Unicode 경계·80개 Batch·구조 보존", () =>
         {
             var b = Sample(); b.UserDocument = string.Concat(Enumerable.Repeat("한글🧊", 1000));

@@ -149,6 +149,7 @@ public class Settings
     public string DeviceName { get; set; } = Environment.MachineName;
     public bool DarkMode { get; set; }
     public bool FocusMode { get; set; }
+    public string ToolbarLayout { get; set; } = "Auto"; // Auto · Horizontal · Vertical (v0.7.1)
     public string LastBoardId { get; set; } = "";
     public string ProtectedApiKey { get; set; } = "";
     public const string DefaultModel = "gemini-3.8-flash";

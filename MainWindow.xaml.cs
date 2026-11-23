@@ -48,6 +48,7 @@ public partial class MainWindow : Window
         timer.Tick += TimerTick; timer.Start(); Closing += OnClosing;
         SetStatus("기기에 저장됨 · AI·Drive 연결은 설정에서 추가하세요.");
         Loaded += async (_, _) => await InitializeWorkspace();
+        SizeChanged += (_, _) => UpdateToolbarLayout(); UpdateToolbarLayout();
     }
     private void SetStatus(string message) => shell.Status = message;
     private void MarkChanged(bool content)
@@ -142,6 +143,45 @@ public partial class MainWindow : Window
         finally { catalogBusy = false; }
     }
     private async void RefreshBoardsClick(object sender, RoutedEventArgs e) => await RefreshDriveBoards();
+    // 툴바 배치 (v0.7.1): 자동이면 창이 세로로 길 때 Canvas 오른쪽에 세로로 둡니다. 크기가 바뀔 때만 계산하므로 필기에는 영향이 없습니다.
+    private bool? verticalTools; private bool? stackedHeader;
+    private void ToolbarModeClick(object sender, RoutedEventArgs e)
+    {
+        settings.ToolbarLayout = settings.ToolbarLayout switch { "Auto" => "Horizontal", "Horizontal" => "Vertical", _ => "Auto" };
+        store.SaveSettings(settings); UpdateToolbarLayout();
+    }
+    private void UpdateToolbarLayout()
+    {
+        ToolbarModeButton.Content = settings.ToolbarLayout switch { "Horizontal" => "툴바 가로", "Vertical" => "툴바 세로", _ => "툴바 자동" };
+        bool vertical = settings.ToolbarLayout switch { "Horizontal" => false, "Vertical" => true, _ => ActualWidth > 0 && ActualHeight > ActualWidth };
+        if (verticalTools != vertical) ApplyToolbarLayout(vertical);
+        // 좁은 창에서는 상단 오른쪽 버튼들을 두 번째 줄로 내립니다.
+        bool stacked = ActualWidth > 0 && ActualWidth < 920;
+        if (stackedHeader != stacked)
+        {
+            stackedHeader = stacked; Grid.SetRow(HeaderActions, stacked ? 1 : 0); Grid.SetColumn(HeaderActions, stacked ? 0 : 1);
+            HeaderActions.HorizontalAlignment = stacked ? HorizontalAlignment.Left : HorizontalAlignment.Stretch; HeaderActions.Margin = new Thickness(0, stacked ? 8 : 0, 0, 0);
+        }
+    }
+    internal void ApplyToolbarLayout(bool vertical)
+    {
+        verticalTools = vertical;
+        ((Panel)ToolsBar.Parent).Children.Remove(ToolsBar);
+        if (vertical) { ContentGrid.Children.Add(ToolsBar); Grid.SetRow(ToolsBar, 0); Grid.SetColumn(ToolsBar, 1); }
+        else { RootGrid.Children.Add(ToolsBar); Grid.SetRow(ToolsBar, 1); Grid.SetColumn(ToolsBar, 0); }
+        var flow = vertical ? Orientation.Vertical : Orientation.Horizontal;
+        ToolsBar.BorderThickness = vertical ? new Thickness(1, 0, 0, 0) : new Thickness(0, 0, 0, 1);
+        ToolsDock.Margin = vertical ? new Thickness(8, 10, 8, 10) : new Thickness(16, 8, 16, 8);
+        DockPanel.SetDock(ToolsActions, vertical ? Dock.Bottom : Dock.Right);
+        ToolsActions.Orientation = ToolsWrap.Orientation = SizeStack.Orientation = SizeSlider.Orientation = flow;
+        ToolsActions.VerticalAlignment = vertical ? VerticalAlignment.Bottom : VerticalAlignment.Center;
+        ToolsWrap.ItemWidth = vertical ? 104 : double.NaN;
+        SizeSlider.Width = vertical ? double.NaN : 95; SizeSlider.Height = vertical ? 120 : double.NaN;
+        SizeSlider.HorizontalAlignment = vertical ? HorizontalAlignment.Center : HorizontalAlignment.Stretch;
+        SizeCaption.Margin = vertical ? new Thickness(0, 6, 0, 4) : new Thickness(14, 0, 5, 0);
+        SizeCaption.HorizontalAlignment = SizeLabel.HorizontalAlignment = vertical ? HorizontalAlignment.Center : HorizontalAlignment.Stretch;
+        SizeLabel.Margin = vertical ? new Thickness(0, 4, 0, 0) : new Thickness(6, 0, 0, 0); SizeLabel.TextAlignment = vertical ? TextAlignment.Center : TextAlignment.Left;
+    }
     // 자동 검증 (v0.7.0): 같은 실행 파일을 --self-test로 따로 실행합니다. 작업 중인 Board와 데이터는 건드리지 않습니다.
     private async void SelfTestClick(object sender, RoutedEventArgs e)
     {
@@ -423,7 +463,7 @@ public partial class MainWindow : Window
         catch (OperationCanceledException) { SetStatus("Drive 폴더 작업이 취소되었습니다."); } catch (Exception ex) { Error(ex); }
     }
     private async void SettingsClick(object sender, RoutedEventArgs e) { try { if (Dialogs.Settings(this, settings)) { uploaded.Clear(); store.SaveSettings(settings); SetStatus("설정을 저장했습니다."); lastConnectivity = DateTime.MinValue; await RefreshDriveBoards(); } } catch (Exception ex) { Error(ex); } }
-    private void HelpClick(object sender, RoutedEventArgs e) => Dialogs.DiagnosticMessage(this, "Prototype 사용 안내 · v0.7.0", "Pen: 필기 / S Pen Button: Pen → Eraser → Lasso\n한 손가락: 이동 / 두 손가락: 이동·확대 / 회전 없음\nMouse: 좌클릭 현재 Tool / 우클릭 이동 / Wheel Zoom\n휠클릭을 누른 채 방향으로 Drag하고 놓으면 Tool 선택\nText Tool: Click하여 생성, 기존 Text Click하여 수정\nLasso: 완전히 포함한 요소 선택, 선택 위 Drag로 이동\nShift+Click: Lasso에서 추가·해제 / Delete: 선택 삭제\nCtrl+Z / Ctrl+Y: 50회 Undo·Redo\n\nAI는 Gemini API key, Drive는 동기화 폴더 경로를 사용합니다. OAuth는 필요 없습니다.\n찾기: 모든 Board·Drive Keyword 검색 및 AI 관련 검색.\nDrive 목록에서 같은 Board를 이어 열 수 있습니다. 작업 → 다른 기기 변경 확인에서 유지·교체·빈 공간 통합을 선택합니다.\n작업 → 공동 편집: 같은 Network의 PC·노트북 연결. Export: PDF·HTML·Markdown·원본. 모바일은 이번 범위에서 제외되었습니다.\n\n" + Surface.PenInputSummary + "\n" + (rawPen?.Summary ?? "HID 초기화 전"));
+    private void HelpClick(object sender, RoutedEventArgs e) => Dialogs.DiagnosticMessage(this, "Prototype 사용 안내 · v0.7.1", "Pen: 필기 / S Pen Button: Pen → Eraser → Lasso\n한 손가락: 이동 / 두 손가락: 이동·확대 / 회전 없음\nMouse: 좌클릭 현재 Tool / 우클릭 이동 / Wheel Zoom\n휠클릭을 누른 채 방향으로 Drag하고 놓으면 Tool 선택\nText Tool: Click하여 생성, 기존 Text Click하여 수정\nLasso: 완전히 포함한 요소 선택, 선택 위 Drag로 이동\nShift+Click: Lasso에서 추가·해제 / Delete: 선택 삭제\nCtrl+Z / Ctrl+Y: 50회 Undo·Redo\n\nAI는 Gemini API key, Drive는 동기화 폴더 경로를 사용합니다. OAuth는 필요 없습니다.\n찾기: 모든 Board·Drive Keyword 검색 및 AI 관련 검색.\nDrive 목록에서 같은 Board를 이어 열 수 있습니다. 작업 → 다른 기기 변경 확인에서 유지·교체·빈 공간 통합을 선택합니다.\n작업 → 공동 편집: 같은 Network의 PC·노트북 연결. Export: PDF·HTML·Markdown·원본. 모바일은 이번 범위에서 제외되었습니다.\n\n" + Surface.PenInputSummary + "\n" + (rawPen?.Summary ?? "HID 초기화 전"));
     private void OpenRadial(Point p) { radialOrigin = p; radialChoice = null; DrawRadial(); }
     private void MoveRadial(Point p)
     {
