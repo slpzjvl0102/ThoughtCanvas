@@ -1,11 +1,16 @@
-ThoughtCanvas — Windows Prototype 0.7.5
-2026-11-17 · PC / 노트북
+ThoughtCanvas — Windows Prototype 0.7.6
+2026-11-23 · PC / 노트북
 
-시작
-1. ZIP 전체를 새 폴더에 압축 해제하고 ThoughtCanvas.exe를 실행합니다.
-2. PC와 노트북 모두 같은 0.7.5 버전을 사용하세요.
-3. 작업 → 연결 설정에서 기기 이름과 각 기기의 Google Drive 폴더 경로를 설정합니다.
-4. 기존 Local 데이터(%LOCALAPPDATA%\ThoughtCanvas)는 유지됩니다. 이전 실행파일은 닫고 새 버전을 실행하세요.
+시작 (0.7.6부터 설치형 · 자동 업데이트)
+1. GitHub Release에서 ThoughtCanvasApp-win-Setup.exe를 받아 한 번 설치합니다. 이전 ZIP 버전은 닫고 폴더를 지워도 됩니다.
+   코드 서명이 없어 처음 설치할 때 SmartScreen 경고가 나옵니다 (추가 정보 → 실행).
+2. 작업 → 연결 설정에서 기기 이름과 각 기기의 Google Drive 폴더 경로를 설정합니다.
+3. 앱이 시작 1분 뒤와 6시간마다 새 버전을 확인해 받아 둡니다. 작업 → 재시작하여 업데이트를 누르거나, 다음 실행 때 자동 적용됩니다.
+4. 설치 위치는 %LOCALAPPDATA%\ThoughtCanvasApp, Local 데이터는 %LOCALAPPDATA%\ThoughtCanvas로 서로 분리되어 업데이트·재설치 후에도 유지됩니다.
+
+새 버전 배포 (개발)
+ThoughtCanvas.csproj의 Version을 올려 main에 merge → GitHub → Actions → Release → Run workflow.
+자동 검증 통과 후 Release v<Version>이 만들어지고, 설치된 앱이 이를 받아 업데이트합니다.
 
 입력
 Pen 필기 / S Pen Button: Pen → Eraser → Lasso 순환.

@@ -12,6 +12,8 @@ public partial class MainWindow : Window
     private readonly BoardStore store;
     private readonly ShellViewModel shell = new();
     private readonly Settings settings;
+    private readonly bool firstRun;
+    private bool firstSetupShown;
     private readonly AiService ai = new();
     private NativePenObserver? penObserver;
     private RawPenInput? rawPen;
@@ -34,7 +36,7 @@ public partial class MainWindow : Window
         Surface.PenToolSwitched += message => SetStatus(message);
         DataContext = shell;
         string root = Environment.GetEnvironmentVariable("THOUGHTCANVAS_DATA") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ThoughtCanvas");
-        store = new BoardStore(root); settings = store.LoadSettings();
+        store = new BoardStore(root); firstRun = !store.HasSettings; settings = store.LoadSettings();
         var board = store.Load(settings.LastBoardId) ?? new Board(); Surface.Load(board);
         if (!store.List().Any(x => x.Id == board.Id)) store.Save(board);
         Surface.Changed += () => { MarkChanged(true); UpdateCounts(); };
@@ -47,8 +49,11 @@ public partial class MainWindow : Window
         initialized = true; ApplyTheme(); ApplyFocus(); UpdateBoards(); UpdatePanels(); UpdateTool(); UpdateCounts();
         timer.Tick += TimerTick; timer.Start(); Closing += OnClosing;
         SetStatus("기기에 저장됨 · AI·Drive 연결은 설정에서 추가하세요.");
-        Loaded += async (_, _) => await InitializeWorkspace();
+        // 첫 실행이면 창이 화면에 그려진 뒤(ContentRendered) 설정 창을 먼저 띄우고, 저장한 설정으로 Drive 목록을 읽습니다
+        if (firstRun) ContentRendered += async (_, _) => { if (firstSetupShown) return; firstSetupShown = true; RunFirstSetup(); await InitializeWorkspace(); };
+        else Loaded += async (_, _) => await InitializeWorkspace();
         SizeChanged += (_, _) => UpdateToolbarLayout(); UpdateToolbarLayout();
+        InitUpdater();
     }
     private void SetStatus(string message) => shell.Status = message;
     // Drive 연결 상태 캐시: null = 아직 확인 전
@@ -81,7 +86,7 @@ public partial class MainWindow : Window
         finally { SelfTestButton.IsEnabled = true; }
     }
     private async void SettingsClick(object sender, RoutedEventArgs e) { try { if (Dialogs.Settings(this, settings)) { uploaded.Clear(); store.SaveSettings(settings); SetStatus("설정을 저장했습니다."); lastConnectivity = DateTime.MinValue; await RefreshDriveBoards(); } } catch (Exception ex) { Error(ex); } }
-    private void HelpClick(object sender, RoutedEventArgs e) => Dialogs.DiagnosticMessage(this, "Prototype 사용 안내 · v0.7.5", "Pen: 필기 / S Pen Button: Pen → Eraser → Lasso\n한 손가락: 이동 / 두 손가락: 이동·확대 / 회전 없음\nMouse: 좌클릭 현재 Tool / 우클릭 이동 / Wheel Zoom\n휠클릭을 누른 채 방향으로 Drag하고 놓으면 Tool 선택\nText Tool: Click하여 생성, 기존 Text Click하여 수정\nLasso: 완전히 포함한 요소 선택, 선택 위 Drag로 이동\nShift+Click: Lasso에서 추가·해제 / Delete: 선택 삭제\nCtrl+Z / Ctrl+Y: 50회 Undo·Redo\n\nAI는 Gemini API key, Drive는 동기화 폴더 경로를 사용합니다. OAuth는 필요 없습니다.\n찾기: 모든 Board·Drive Keyword 검색 및 AI 관련 검색.\nDrive 목록에서 같은 Board를 이어 열 수 있습니다. 작업 → 다른 기기 변경 확인에서 유지·교체·빈 공간 통합을 선택합니다.\n작업 → 공동 편집: 같은 Network의 PC·노트북 연결. Export: PDF·HTML·Markdown·원본. 모바일은 이번 범위에서 제외되었습니다.\n\n" + Surface.PenInputSummary + "\n" + (rawPen?.Summary ?? "HID 초기화 전"));
+    private void HelpClick(object sender, RoutedEventArgs e) => Dialogs.DiagnosticMessage(this, "Prototype 사용 안내 · v" + updater.CurrentVersion, "Pen: 필기 / S Pen Button: Pen → Eraser → Lasso\n한 손가락: 이동 / 두 손가락: 이동·확대 / 회전 없음\nMouse: 좌클릭 현재 Tool / 우클릭 이동 / Wheel Zoom\n휠클릭을 누른 채 방향으로 Drag하고 놓으면 Tool 선택\nText Tool: Click하여 생성, 기존 Text Click하여 수정\nLasso: 완전히 포함한 요소 선택, 선택 위 Drag로 이동\nShift+Click: Lasso에서 추가·해제 / Delete: 선택 삭제\nCtrl+Z / Ctrl+Y: 50회 Undo·Redo\n\nAI는 Gemini API key, Drive는 동기화 폴더 경로를 사용합니다. OAuth는 필요 없습니다.\n찾기: 모든 Board·Drive Keyword 검색 및 AI 관련 검색.\nDrive 목록에서 같은 Board를 이어 열 수 있습니다. 작업 → 다른 기기 변경 확인에서 유지·교체·빈 공간 통합을 선택합니다.\n작업 → 공동 편집: 같은 Network의 PC·노트북 연결. Export: PDF·HTML·Markdown·원본. 모바일은 이번 범위에서 제외되었습니다.\n\n" + Surface.PenInputSummary + "\n" + (rawPen?.Summary ?? "HID 초기화 전"));
     private void Error(Exception ex) { SetStatus(ex.Message); Dialogs.Message(this, "작업을 완료하지 못했습니다", ex.Message); }
     private void OnClosing(object? sender, CancelEventArgs e)
     {

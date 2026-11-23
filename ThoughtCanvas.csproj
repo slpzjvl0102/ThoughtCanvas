@@ -6,7 +6,9 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
-    <Version>0.7.5</Version>
+    <Version>0.7.6</Version>
+    <!-- Velopack 훅을 WPF보다 먼저 처리하기 위해 Program.Main을 진입점으로 씁니다 -->
+    <StartupObject>ThoughtCanvas.Program</StartupObject>
     <!-- WPF 메시지 리소스는 한국어만 포함 (다른 언어는 영문 기본값) -->
     <SatelliteResourceLanguages>ko</SatelliteResourceLanguages>
   </PropertyGroup>
@@ -14,6 +16,7 @@
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
+    <PackageReference Include="Velopack" Version="1.2.161" />
   </ItemGroup>
 
 </Project>

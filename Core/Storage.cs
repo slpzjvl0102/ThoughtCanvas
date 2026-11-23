@@ -80,6 +80,8 @@ public class BoardStore
         using var c = Open(); using var cmd = c.CreateCommand(); cmd.CommandText = "INSERT OR IGNORE INTO revisions(board_id,revision,json) VALUES($id,$revision,$json)";
         cmd.Parameters.AddWithValue("$id", id); cmd.Parameters.AddWithValue("$revision", revision); cmd.Parameters.AddWithValue("$json", DataJson.Write(copy)); cmd.ExecuteNonQuery(); return revision;
     }
+    // 설정 파일이 아직 없으면 이 기기에서 처음 실행한 것입니다 (기존 사용자는 이미 있음)
+    public bool HasSettings => File.Exists(Path.Combine(Root, "settings.json"));
     public Settings LoadSettings()
     {
         var settings = File.Exists(Path.Combine(Root, "settings.json")) ? DataJson.Read<Settings>(File.ReadAllText(Path.Combine(Root, "settings.json"))) : new Settings();

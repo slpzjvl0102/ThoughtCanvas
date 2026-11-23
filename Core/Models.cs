@@ -168,7 +168,7 @@ public class Settings
     public string ProtectedRefreshToken { get; set; } = "";
     public string DriveRootId { get; set; } = "";
     public bool AutomaticDrive { get; set; }
-    public string DriveSyncFolder { get; set; } = @"G:\내 드라이브";
+    public string DriveSyncFolder { get; set; } = "";
     public bool AutomaticFolderBackup { get; set; } = true;
 }
 public class TopicDocument
