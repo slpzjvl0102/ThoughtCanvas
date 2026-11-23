@@ -85,6 +85,7 @@ Drive: ThoughtCanvas/Devices/기기ID.json (기기 이름·최근 등록 시각)
 개발
 빌드: dotnet build -c Release (.NET 10 SDK, Windows).
 자동 검증: ThoughtCanvas.exe --self-test <결과 파일 경로>. 모두 통과하면 종료 코드 0입니다.
+소스 구조: Core(Model·저장), Canvas(BoardSurface), Input(S Pen), Sync(Drive·공동 편집), AI, Export, UI(MainWindow·Dialog), Tests(자동 검증).
 GitHub에 push하면 .github/workflows/build.yml이 Windows에서 빌드와 자동 검증을 실행하고, 결과 파일을 Actions의 self-test-report로 올립니다.
 
 버전별 변경 내역
