@@ -3,12 +3,12 @@ using System.Windows.Threading;
 
 namespace ThoughtCanvas;
 
-// 자동 업데이트 (GitHub Releases, Velopack): 시작 1분 뒤와 이후 6시간마다 확인해 백그라운드로 받아 둡니다.
-// 작업 → "재시작하여 업데이트"로 바로 적용하거나, 다음 실행 때 자동 적용됩니다.
+// 자동 업데이트 (GitHub Releases, Velopack): 시작 10초 뒤와 이후 6시간마다 확인해 백그라운드로 받아 둡니다.
+// 작업 → "재시작하여 업데이트"로 바로 적용하거나, 앱을 닫을 때 자동 적용됩니다 (다음 실행은 새 버전).
 public partial class MainWindow
 {
     private readonly AppUpdater updater = new();
-    private readonly DispatcherTimer updateTimer = new() { Interval = TimeSpan.FromMinutes(1) };
+    private readonly DispatcherTimer updateTimer = new() { Interval = TimeSpan.FromSeconds(10) };
 
     private void InitUpdater()
     {
@@ -16,7 +16,8 @@ public partial class MainWindow
         if (!updater.IsInstalled) return;
         updateTimer.Tick += async (_, _) => { updateTimer.Interval = TimeSpan.FromHours(6); await CheckForUpdate(false); };
         updateTimer.Start();
-        Closed += (_, _) => updateTimer.Stop();
+        // 받아 둔 업데이트는 창을 닫을 때(저장 완료 후) 적용해, 다음 실행이 바로 새 버전이 되게 합니다
+        Closed += (_, _) => { updateTimer.Stop(); updater.ScheduleApplyOnExit(restart: false); };
     }
 
     private async void UpdateClick(object sender, RoutedEventArgs e)
@@ -38,7 +39,7 @@ public partial class MainWindow
         switch (result)
         {
             case UpdateCheckResult.Ready:
-                SetStatus($"새 버전 v{updater.ReadyVersion} 준비됨 · 작업 → 재시작하여 업데이트 (다음 실행 때 자동 적용)");
+                SetStatus($"새 버전 v{updater.ReadyVersion} 준비됨 · 작업 → 재시작하여 업데이트 (닫을 때 자동 적용)");
                 break;
             case UpdateCheckResult.UpToDate when manual:
                 SetStatus($"최신 버전입니다 · v{updater.CurrentVersion}");

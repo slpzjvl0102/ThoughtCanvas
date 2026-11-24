@@ -55,12 +55,17 @@ public sealed class AppUpdater
         finally { Interlocked.Exchange(ref busy, 0); }
     }
 
-    // 앱이 정상 종료(저장)된 뒤 업데이트를 적용하고 다시 실행하도록 예약합니다. 호출 후 창을 평소처럼 닫으면 됩니다.
-    public bool ScheduleApplyOnExit()
+    private bool scheduled;
+
+    // 앱이 정상 종료(저장)된 뒤 업데이트를 적용하도록 예약합니다. 호출 후 창을 평소처럼 닫으면 됩니다.
+    // restart: true면 적용 후 다시 실행("재시작하여 업데이트"), false면 적용만 하고 끝냅니다(그냥 닫을 때).
+    public bool ScheduleApplyOnExit(bool restart = true)
     {
+        if (scheduled || !IsInstalled) return scheduled;
         var asset = ready ?? manager.UpdatePendingRestart;
         if (asset is null) return false;
-        manager.WaitExitThenApplyUpdates(asset, silent: true, restart: true);
+        manager.WaitExitThenApplyUpdates(asset, silent: true, restart: restart);
+        scheduled = true;
         return true;
     }
 }
