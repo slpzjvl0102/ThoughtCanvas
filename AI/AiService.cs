@@ -54,7 +54,8 @@ public class AiService
             Prefer lists; use tables only for genuinely parallel comparisons. No invented specifications and no filler introductions or conclusions.
             ArchivedDocument explains reviewed ideas, their original problem, conditions, reason (or missing), and related alternatives.
             Honor user-confirmed review answers and document edits. Do not present an unverified inference as confirmed. Include all meaningful source content, not only polished conclusions.
-            Reviews prioritize word, classification, connection, contradiction. Ask specific actionable questions. Preserve unresolved questions; exclude already resolved questions unless new evidence conflicts.
+            Ignore stray marks with no meaning: accidental dots, specks, tiny ticks or pen slips that are not part of a letter, number, symbol, punctuation, shape, arrow or connection. Do not create Ideas or Reviews about them; isolated stray dots are already removed from the manifest and images.
+            Reviews prioritize word, classification, connection, contradiction. Ask specific actionable questions about meaningful content only. Preserve unresolved questions; exclude already resolved questions unless new evidence conflicts.
             """;
         if (string.IsNullOrWhiteSpace(key)) throw new InvalidOperationException("설정에서 Gemini API key를 입력하세요.");
         if (!GeminiModels.IsValid(model))
@@ -135,7 +136,8 @@ public class AiService
             throw new InvalidDataException("AI가 유효하지 않은 원본 ID를 반환했습니다. 잘못된 출처를 저장하지 않았습니다.");
         if (result.Ideas.Select(i => i.Id).Distinct().Count() != result.Ideas.Count) throw new InvalidDataException("AI 아이디어 ID가 중복되었습니다.");
         var referenced = result.Ideas.SelectMany(i => i.SourceIds).Concat(result.Reviews.SelectMany(r => r.SourceIds)).ToHashSet();
-        var missing = snapshot.AllSourceIds().Except(referenced).ToList();
+        // 작은 점·흔적은 연결되지 않아도 검증 항목으로 만들지 않습니다 (v0.7.9).
+        var missing = snapshot.AllSourceIds().Except(referenced).Except(InkNoise.Tiny(snapshot)).ToList();
         if (missing.Count > 0) result.Reviews.Add(new() { Kind = "classification", Question = $"구조화 기록에 연결되지 않은 원본 요소 {missing.Count}개를 확인해 주세요. 장식 또는 누락된 내용일 수 있습니다.", SourceIds = missing });
         result.SourceRevision = snapshot.Revision; result.CreatedUtc = DateTime.UtcNow;
         foreach (var idea in result.Ideas)

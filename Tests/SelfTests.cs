@@ -61,6 +61,25 @@ public static class SelfTests
             Assert(rejected, "조작된 원본 ID 허용"); var result = AiService.Parse(Wrap(new() { Document = "초안" }), b); Assert(result.Reviews.Single().SourceIds.Contains(b.Ink[0].Id), "누락된 요소가 숨겨짐");
             rejected = false; try { AiService.Parse("{\"candidates\":[{\"finishReason\":\"MAX_TOKENS\"}]}", b); } catch (InvalidDataException) { rejected = true; } Assert(rejected, "불완전 응답 허용");
         });
+        Test("AI 정리: 고립된 실수 점 제외·마침표·도형 유지", () =>
+        {
+            InkItem Dot(double x, double y) => new() { Points = [new(x, y), new(x + 2, y + 1), new(x + 1, y + 3)], Width = 3 };
+            var stray = Dot(800, 800); var period = Dot(205, 52); var pair1 = Dot(500, 300); var pair2 = Dot(500, 312);
+            var b = new Board { Revision = 3, Ink = [Line(), stray, period, pair1, pair2], Texts = [new() { Id = "t", Text = "메모", X = 20, Y = 200 }] };
+            var noise = InkNoise.Find(b);
+            Assert(noise.SetEquals([stray.Id]), "고립된 점 판별 오류 (마침표·콜론처럼 다른 요소 옆 점까지 제외)");
+            var regions = ExportService.RenderRegions(b, noise); var sent = regions.SelectMany(r => r.SourceIds).ToHashSet();
+            Assert(!sent.Contains(stray.Id) && sent.Contains(period.Id) && sent.Contains(b.Ink[0].Id), "AI 구역 이미지에서 점 제외 실패 또는 내용 누락");
+            Assert(ExportService.RenderRegions(b).SelectMany(r => r.SourceIds).Contains(stray.Id), "Export에서 원본 획 누락");
+            b.Analysis = new() { Reviews = [new() { Kind = "word", Question = "이 점은 무엇인가요?", SourceIds = [stray.Id] }, new() { Kind = "word", Question = "선의 의미?", SourceIds = [b.Ink[0].Id] }] };
+            var body = string.Join("\n", AiRequestContext.Build(b, regions).Parts.Select(p => JsonSerializer.SerializeToElement(p)).Where(p => p.TryGetProperty("text", out _)).Select(p => p.GetProperty("text").GetString()));
+            Assert(!body.Contains("이 점은 무엇인가요?") && body.Contains("선의 의미?"), "점에 대한 미해결 검증이 계속 이어짐");
+            Assert(b.Ink.Count == 5, "원본 Board 변경");
+            var result = AiService.Parse(WrapResponse(new() { Document = "초안", Ideas = [new() { Id = "i", SourceIds = [b.Ink[0].Id, "t"] }] }), b);
+            Assert(result.Reviews.Count == 0, "작은 점이 누락 요소 검증 항목으로 등록됨");
+            b.Ink.Add(Line()); result = AiService.Parse(WrapResponse(new() { Document = "초안", Ideas = [new() { Id = "i", SourceIds = [b.Ink[0].Id, "t"] }] }), b);
+            Assert(result.Reviews.Single().SourceIds.SequenceEqual([b.Ink[^1].Id]), "의미 있는 획 누락 검증이 사라짐");
+        });
         Test("DPAPI Local credential 왕복", () => { var encrypted = Secrets.Protect("test-only-not-a-real-key"); Assert(encrypted != "test-only-not-a-real-key" && Secrets.Unprotect(encrypted) == "test-only-not-a-real-key", "암호화 실패"); });
         Test("음수 좌표 Canvas·Viewport 역변환", () =>
         {
