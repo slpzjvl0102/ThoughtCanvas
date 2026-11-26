@@ -16,7 +16,7 @@ public partial class MainWindow : Window
         string key = GeminiCredentials.Resolve(settings).Key; if (key.Length == 0) { if (interactive) Dialogs.Message(this, "AI 설정 필요", "GEMINI_API_KEY 또는 GOOGLE_API_KEY 환경 변수를 설정하거나 앱 설정에 Gemini API key를 입력하세요. Model은 설정에서 변경할 수 있습니다. 자동 실행은 설정에서 켤 수 있습니다."); return; }
         SaveNow(); var target = Surface.Board; string json = DataJson.Write(target); aiBusy = true;
         Board snapshot; List<RegionData> regions;
-        try { (snapshot, regions) = await RenderOffUi(() => { var board = DataJson.Read<Board>(json); return (board, ExportService.RenderRegions(board)); }); }
+        try { (snapshot, regions) = await RenderOffUi(() => { var board = DataJson.Read<Board>(json); return (board, ExportService.RenderRegions(board, InkNoise.Find(board))); }); }
         catch { aiBusy = false; throw; }
         lastAi = DateTime.UtcNow; SetStatus("AI가 원본을 구조화하고 있습니다. 계속 필기하셔도 됩니다.");
         try

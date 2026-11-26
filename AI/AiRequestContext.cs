@@ -16,7 +16,7 @@ public sealed class AiRequestContext
     public static string Fingerprint(RegionData r) => Convert.ToHexString(SHA256.HashData(r.Png.Concat(Encoding.UTF8.GetBytes(Json(new { r.X, r.Y, r.Size, r.SourceIds }))).ToArray()));
     public static AiRequestContext Build(Board board, List<RegionData> regions, bool full = false)
     {
-        var context = new AiRequestContext();
+        var context = new AiRequestContext(); var noise = InkNoise.Find(board);
         var ids = board.AllSourceIds().Concat(board.Analysis?.Ideas.SelectMany(i => i.SourceIds) ?? []).Concat(board.Analysis?.Reviews.SelectMany(r => r.SourceIds) ?? []).Distinct().ToList();
         var alias = ids.Select((id, index) => (id, name: "s" + index)).ToDictionary(x => x.id, x => x.name);
         foreach (var pair in alias) context.DecodeIds[pair.Value] = pair.Key;
@@ -24,7 +24,8 @@ public sealed class AiRequestContext
         var previous = board.Analysis == null ? null : JsonNode.Parse(Json(new
         {
             Ideas = board.Analysis.Ideas.Select(i => new { i.Id, i.Topic, i.Category, i.Content, i.Context, i.Reason, i.Status, i.Evidence, i.SourceIds, i.Relations, i.SourceRevision }),
-            Reviews = board.Analysis.Reviews.DistinctBy(r => (r.Kind, r.Question, r.Answer, r.Resolved, string.Join(",", r.SourceIds.Order())))
+            // 고립된 실수 점만 가리키는 미해결 검증은 이어 가지 않습니다 (v0.7.9).
+            Reviews = board.Analysis.Reviews.Where(r => r.Resolved || r.SourceIds.Count == 0 || !r.SourceIds.All(noise.Contains)).DistinctBy(r => (r.Kind, r.Question, r.Answer, r.Resolved, string.Join(",", r.SourceIds.Order())))
                 .Select(r => new { r.Kind, r.Question, r.Answer, r.Resolved, r.SourceIds }),
             board.Analysis.ArchivedDocument
         }));
@@ -40,7 +41,7 @@ public sealed class AiRequestContext
         {
             board.Title, board.Revision,
             CoordinateFormat = "Ink bounds: [left,top,right,bottom], global canvas coordinates. Source IDs are request-local aliases; return them exactly.",
-            Ink = board.Ink.Select(i => new { Id = A(i.Id), ParentId = i.ParentId == null ? null : A(i.ParentId), Bounds = Box(i), i.Color }),
+            Ink = board.Ink.Where(i => !noise.Contains(i.Id)).Select(i => new { Id = A(i.Id), ParentId = i.ParentId == null ? null : A(i.ParentId), Bounds = Box(i), i.Color }),
             Texts = board.Texts.Select(t => new { Id = A(t.Id), t.X, t.Y, t.Width, t.FontSize, t.Text }),
             PreviousStructuredContext = previous,
             CurrentDocument = string.IsNullOrEmpty(board.UserDocument) ? board.Analysis?.Document : board.UserDocument,

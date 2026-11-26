@@ -10,9 +10,10 @@ public record RegionData(string Name, double X, double Y, double Size, List<stri
 public static class ExportService
 {
     public const double RegionSize = 1200;
-    public static List<RegionData> RenderRegions(Board board)
+    public static List<RegionData> RenderRegions(Board board, ISet<string>? skip = null)
     {
-        var ink = board.Ink.Where(x => x.Points.Count > 0).Select(x => (Item: x, Stroke: x.ToStroke())).ToArray();
+        // skip: AI 정리에서 제외할 고립된 실수 점 (v0.7.9). Export·PDF는 모든 획을 그립니다.
+        var ink = board.Ink.Where(x => x.Points.Count > 0 && skip?.Contains(x.Id) != true).Select(x => (Item: x, Stroke: x.ToStroke())).ToArray();
         var cells = new HashSet<(int X, int Y)>();
         void Add(Rect b)
         {
